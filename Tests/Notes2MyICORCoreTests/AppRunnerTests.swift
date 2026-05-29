@@ -10,6 +10,7 @@ final class AppRunnerTests: XCTestCase {
         XCTAssertEqual(code, 0)
         XCTAssertTrue(recorder.stdout.contains("Usage:"))
         XCTAssertTrue(recorder.stdout.contains("notes2myicor init"))
+        XCTAssertTrue(recorder.stdout.contains("inspect-schema"))
     }
 
     func testVersionCommandPrintsVersion() {
@@ -53,5 +54,21 @@ final class AppRunnerTests: XCTestCase {
 
         XCTAssertEqual(code, 1)
         XCTAssertTrue(recorder.stderr.contains("already exists"))
+    }
+
+    func testInspectSchemaCommandPrintsFixtureSchema() throws {
+        let directory = try TemporaryDirectory()
+        let databaseURL = directory.url.appendingPathComponent("NoteStore.sqlite")
+        try SQLiteFixture.createAppleNotesLikeDatabase(at: databaseURL)
+
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: ["inspect-schema", "--database", databaseURL.path])
+
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(recorder.stdout.contains("Apple Notes schema inspection"))
+        XCTAssertTrue(recorder.stdout.contains("ZICCLOUDSYNCINGOBJECT"))
+        XCTAssertTrue(recorder.stdout.contains("ZICNOTEDATA"))
+        XCTAssertFalse(recorder.stdout.contains("hello note body"))
     }
 }

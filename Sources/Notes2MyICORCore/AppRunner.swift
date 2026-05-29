@@ -44,6 +44,23 @@ public struct AppRunner {
             let url = paths.expandPath(configPath ?? paths.defaultConfigPath).standardizedFileURL
             try ConfigStore(fileManager: fileManager).writeDefaultConfig(to: url, overwrite: force)
             output("Created config: \(url.path)")
+        case .inspectSchema(let databasePath, let notesContainerPath):
+            let paths = AppPaths(fileManager: fileManager, environment: environment)
+            let databaseURL: URL
+
+            if let databasePath {
+                databaseURL = paths.expandPath(databasePath).standardizedFileURL
+            } else if let notesContainerPath {
+                databaseURL = paths
+                    .expandPath(notesContainerPath)
+                    .appendingPathComponent("NoteStore.sqlite")
+                    .standardizedFileURL
+            } else {
+                databaseURL = AppleNotesPaths(paths: paths).noteStoreDatabaseURL
+            }
+
+            let inspection = try AppleNotesSchemaInspector(fileManager: fileManager).inspect(databaseURL: databaseURL)
+            output(SchemaInspectionFormatter().format(inspection))
         }
     }
 }
@@ -56,15 +73,19 @@ public extension AppRunner {
       notes2myicor --help
       notes2myicor version
       notes2myicor init [--config <path>] [--force]
+      notes2myicor inspect-schema [--database <path>] [--notes-container <path>]
 
     Commands:
-      init       Create a default JSON config file.
-      version    Print the application version.
+      init             Create a default JSON config file.
+      inspect-schema   Inspect the local Apple Notes SQLite schema read-only.
+      version          Print the application version.
 
     Options:
-      --config   Config file path. Defaults to ~/Library/Application Support/Notes2MyICOR/config.json.
-      --force    Overwrite an existing config file when used with init.
-      --help     Show this help.
+      --config            Config file path. Defaults to ~/Library/Application Support/Notes2MyICOR/config.json.
+      --database          SQLite database path for schema inspection.
+      --notes-container   Apple Notes group container path. Defaults to ~/Library/Group Containers/group.com.apple.notes.
+      --force             Overwrite an existing config file when used with init.
+      --help              Show this help.
     """
 }
 
@@ -72,6 +93,7 @@ public enum CLICommand: Equatable, Sendable {
     case help
     case version
     case initConfig(configPath: String?, force: Bool)
+    case inspectSchema(databasePath: String?, notesContainerPath: String?)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -85,6 +107,8 @@ public enum CLICommand: Equatable, Sendable {
             return .version
         case "init":
             return try parseInit(Array(arguments.dropFirst()))
+        case "inspect-schema":
+            return try parseInspectSchema(Array(arguments.dropFirst()))
         default:
             throw CLIError.usage("Unknown command: \(first)")
         }
@@ -112,6 +136,33 @@ public enum CLICommand: Equatable, Sendable {
         }
 
         return .initConfig(configPath: configPath, force: force)
+    }
+
+    private static func parseInspectSchema(_ arguments: [String]) throws -> CLICommand {
+        var databasePath: String?
+        var notesContainerPath: String?
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            switch argument {
+            case "--database":
+                guard let value = iterator.next(), value.hasPrefix("--") == false else {
+                    throw CLIError.usage("Missing value for --database")
+                }
+                databasePath = value
+            case "--notes-container":
+                guard let value = iterator.next(), value.hasPrefix("--") == false else {
+                    throw CLIError.usage("Missing value for --notes-container")
+                }
+                notesContainerPath = value
+            case "--help", "-h":
+                return .help
+            default:
+                throw CLIError.usage("Unknown inspect-schema option: \(argument)")
+            }
+        }
+
+        return .inspectSchema(databasePath: databasePath, notesContainerPath: notesContainerPath)
     }
 }
 

@@ -22,6 +22,7 @@ swift test
 swift run notes2myicor --help
 swift run notes2myicor version
 swift run notes2myicor init
+swift run notes2myicor inspect-schema
 ```
 
 `notes2myicor init` creates a default JSON config at:
@@ -32,7 +33,7 @@ swift run notes2myicor init
 
 The generated config is local runtime state and is ignored by Git.
 
-## Current Stage
+## Implemented Stages
 
 Stage 0 is the bootstrap stage:
 
@@ -45,3 +46,17 @@ Stage 0 is the bootstrap stage:
 - tests for the baseline behavior
 
 No Apple Notes data is read during Stage 0.
+
+Stage 1 adds read-only schema inspection for the local Apple Notes SQLite store:
+
+```bash
+swift run notes2myicor inspect-schema
+```
+
+For fixture or development databases:
+
+```bash
+swift run notes2myicor inspect-schema --database /path/to/NoteStore.sqlite
+```
+
+The command opens SQLite in read-only URI mode, sets `PRAGMA query_only = ON`, and prints table/column metadata only. It does not read or print note bodies.

@@ -11,7 +11,10 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "Notes2MyICORCore"
+            name: "Notes2MyICORCore",
+            linkerSettings: [
+                .linkedLibrary("sqlite3"),
+            ]
         ),
         .executableTarget(
             name: "notes2myicor",
