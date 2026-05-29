@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "notes2myicor",
     platforms: [
-        .macOS(.v10_15),
+        .macOS(.v11),
     ],
     products: [
         .executable(name: "notes2myicor", targets: ["notes2myicor"]),
@@ -16,6 +16,7 @@ let package = Package(
         .target(
             name: "Notes2MyICORCore",
             linkerSettings: [
+                .linkedFramework("WebKit"),
                 .linkedLibrary("sqlite3"),
             ]
         ),

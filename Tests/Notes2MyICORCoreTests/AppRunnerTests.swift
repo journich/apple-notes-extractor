@@ -232,4 +232,38 @@ final class AppRunnerTests: XCTestCase {
         XCTAssertEqual(code, 1)
         XCTAssertTrue(recorder.stderr.contains("Parser script not found"))
     }
+
+    func testExportCommandRendersHTMLFixture() throws {
+        let directory = try TemporaryDirectory()
+        let htmlURL = directory.url.appendingPathComponent("fixture.html")
+        let outputURL = directory.url.appendingPathComponent("output", isDirectory: true)
+        try Data("<p>Fixture body</p>".utf8).write(to: htmlURL)
+
+        let recorder = OutputRecorder()
+        let code = AppRunner(
+            pdfRenderer: AppRunnerFakePDFRenderer(),
+            output: recorder.output,
+            errorOutput: recorder.error
+        )
+        .run(arguments: [
+            "export",
+            "--note-uuid", "fixture-uuid",
+            "--title", "Fixture",
+            "--html", htmlURL.path,
+            "--output-dir", outputURL.path,
+            "--debug-html",
+        ])
+
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(recorder.stdout.contains("Export complete:"))
+        XCTAssertTrue(recorder.stdout.contains("PDF:"))
+        XCTAssertTrue(recorder.stdout.contains("Sidecar JSON:"))
+        XCTAssertTrue(recorder.stdout.contains("Debug HTML:"))
+    }
+}
+
+private final class AppRunnerFakePDFRenderer: PDFRendering {
+    func renderPDF(html: String, baseURL: URL?) throws -> Data {
+        Data("%PDF fake".utf8)
+    }
 }

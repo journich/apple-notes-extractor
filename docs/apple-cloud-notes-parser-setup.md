@@ -72,3 +72,11 @@ swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_c
 ```
 
 Debug HTML is generated output and may contain note contents. Keep it outside the repository and delete it after local verification.
+
+Stage 9 can export one parser-backed note to PDF:
+
+```bash
+swift run notes2myicor export --note-uuid <uuid> --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
+```
+
+The export command uses WebKit's native PDF renderer and writes sidecar JSON next to the PDF. Keep export output outside the repository unless it uses synthetic fixture data.

@@ -3,17 +3,20 @@ import Foundation
 public struct AppRunner {
     public let fileManager: FileManager
     public let environment: [String: String]
+    public let pdfRenderer: PDFRendering
     public let output: @Sendable (String) -> Void
     public let errorOutput: @Sendable (String) -> Void
 
     public init(
         fileManager: FileManager = .default,
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        pdfRenderer: PDFRendering = WebKitPDFRenderer(),
         output: @escaping @Sendable (String) -> Void = { print($0) },
         errorOutput: @escaping @Sendable (String) -> Void = { FileHandle.standardError.write(Data(($0 + "\n").utf8)) }
     ) {
         self.fileManager = fileManager
         self.environment = environment
+        self.pdfRenderer = pdfRenderer
         self.output = output
         self.errorOutput = errorOutput
     }
@@ -124,6 +127,54 @@ public struct AppRunner {
                 debugHTMLURLs = []
             }
             output(AppleCloudNotesParserFormatter().format(result, documents: documents, debugHTMLURLs: debugHTMLURLs))
+        case .export(let noteUUID, let title, let htmlPath, let accountName, let folderPath, let notesContainerPath, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let writeDebugHTML):
+            let paths = AppPaths(fileManager: fileManager, environment: environment)
+            let outputDirectory = paths.expandPath(outputDirectoryPath ?? AppConfig.defaultConfig.paths.outputDirectory).standardizedFileURL
+            let document: NoteDocument
+            if let htmlPath {
+                let htmlURL = paths.expandPath(htmlPath).standardizedFileURL
+                let html = try String(contentsOf: htmlURL, encoding: .utf8)
+                document = NoteDocument(
+                    uuid: noteUUID,
+                    title: title ?? htmlURL.deletingPathExtension().lastPathComponent,
+                    accountName: accountName,
+                    folderPath: folderPath,
+                    createdAt: nil,
+                    modifiedAt: nil,
+                    htmlPath: htmlURL.path,
+                    htmlContent: html,
+                    assets: NoteDocumentAssetResolver().resolveAssets(html: html, htmlPath: htmlURL.path)
+                )
+            } else {
+                let source = notesContainerPath.map { paths.expandPath($0).standardizedFileURL }
+                    ?? AppleNotesPaths(paths: paths).groupContainerURL
+                let parserOutputDirectory = paths.expandPath(parserOutputDirectoryPath ?? "~/Library/Application Support/Notes2MyICOR/acnp-output").standardizedFileURL
+                let parser = AppleCloudNotesParser(config: AppleCloudNotesParserConfig(
+                    rubyExecutablePath: rubyPath ?? "/opt/homebrew/opt/ruby/bin/ruby",
+                    parserScriptPath: parserScriptPath ?? "../apple_cloud_notes_parser/notes_cloud_ripper.rb",
+                    outputDirectory: parserOutputDirectory
+                ))
+                let result = try parser.parse(notesContainer: source, noteUUIDs: [noteUUID])
+                guard let parsedNote = result.notes.first else {
+                    throw AppleCloudNotesParserError.noteNotFound(noteUUID)
+                }
+                document = NoteDocumentBuilder().document(
+                    parsedNote: parsedNote,
+                    accountName: accountName,
+                    folderPath: folderPath
+                )
+            }
+
+            let result = try NoteExporter(pdfRenderer: pdfRenderer).export(
+                document: document,
+                options: NoteExportOptions(
+                    outputDirectory: outputDirectory,
+                    mirrorFolderTree: AppConfig.defaultConfig.export.mirrorFolderTree,
+                    writeSidecarJSON: AppConfig.defaultConfig.export.writeSidecarJSON,
+                    writeDebugHTML: writeDebugHTML
+                )
+            )
+            output(NoteExportFormatter().format(result))
         }
     }
 
@@ -173,9 +224,11 @@ public extension AppRunner {
       notes2myicor scan --account <name> --folder <path> [--recursive] [--database <path>] [--notes-container <path>] [--state-db <path>]
       notes2myicor snapshot [--notes-container <path>] [--work-dir <path>]
       notes2myicor parse [--note-uuid <uuid>] [--notes-container <path>] [--parser-script <path>] [--ruby <path>] [--output-dir <path>] [--debug-html-dir <path>]
+      notes2myicor export --note-uuid <uuid> [--html <path>] [--title <title>] [--output-dir <path>] [--debug-html]
 
     Commands:
       accounts         List Apple Notes accounts.
+      export           Render one note document to PDF with sidecar JSON.
       folders          List Apple Notes folders.
       init             Create a default JSON config file.
       inspect-schema   Inspect the local Apple Notes SQLite schema read-only.
@@ -194,14 +247,18 @@ public extension AppRunner {
       --database          SQLite database path for schema inspection.
       --debug-html-dir    Directory for rendered debug HTML output.
       --folder            Apple Notes folder path.
+      --html              HTML file path for fixture or debug export input.
       --notes-container   Apple Notes group container path. Defaults to ~/Library/Group Containers/group.com.apple.notes.
       --note-uuid         Apple Notes note UUID.
       --output-dir        Parser output directory.
+      --parser-output-dir Parser work output directory when export invokes the parser.
       --parser-script     Apple Cloud Notes Parser notes_cloud_ripper.rb path.
       --recursive         Include subfolders when used with notes and --folder.
       --ruby              Ruby executable path for Apple Cloud Notes Parser.
       --state-db          App-owned state database path.
+      --title             Note title for HTML fixture export input.
       --work-dir          Snapshot work directory.
+      --debug-html        Write rendered debug HTML next to the PDF when used with export.
       --force             Overwrite an existing config file when used with init.
       --help              Show this help.
     """
@@ -221,6 +278,7 @@ public enum CLICommand: Equatable, Sendable {
     case scan(accountName: String, folderPath: String, recursive: Bool, databasePath: String?, notesContainerPath: String?, stateDatabasePath: String?)
     case snapshot(notesContainerPath: String?, workDirectoryPath: String?)
     case parse(noteUUID: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, outputDirectoryPath: String?, debugHTMLDirectoryPath: String?)
+    case export(noteUUID: String, title: String?, htmlPath: String?, accountName: String?, folderPath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, writeDebugHTML: Bool)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -303,6 +361,24 @@ public enum CLICommand: Equatable, Sendable {
                 rubyPath: options.rubyPath,
                 outputDirectoryPath: options.outputDirectoryPath,
                 debugHTMLDirectoryPath: options.debugHTMLDirectoryPath
+            )
+        case "export":
+            let options = try parseExportOptions(Array(arguments.dropFirst()))
+            guard let noteUUID = options.noteUUID else {
+                throw CLIError.usage("Missing required option: --note-uuid")
+            }
+            return .export(
+                noteUUID: noteUUID,
+                title: options.title,
+                htmlPath: options.htmlPath,
+                accountName: options.accountName,
+                folderPath: options.folderPath,
+                notesContainerPath: options.notesContainerPath,
+                parserScriptPath: options.parserScriptPath,
+                rubyPath: options.rubyPath,
+                parserOutputDirectoryPath: options.parserOutputDirectoryPath,
+                outputDirectoryPath: options.outputDirectoryPath,
+                writeDebugHTML: options.writeDebugHTML
             )
         default:
             throw CLIError.usage("Unknown command: \(first)")
@@ -466,6 +542,44 @@ public enum CLICommand: Equatable, Sendable {
         return options
     }
 
+    private static func parseExportOptions(_ arguments: [String]) throws -> ExportOptions {
+        var options = ExportOptions()
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            switch argument {
+            case "--note-uuid":
+                options.noteUUID = try requireValue(iterator.next(), for: argument)
+            case "--title":
+                options.title = try requireValue(iterator.next(), for: argument)
+            case "--html":
+                options.htmlPath = try requireValue(iterator.next(), for: argument)
+            case "--account":
+                options.accountName = try requireValue(iterator.next(), for: argument)
+            case "--folder":
+                options.folderPath = try requireValue(iterator.next(), for: argument)
+            case "--notes-container":
+                options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-script":
+                options.parserScriptPath = try requireValue(iterator.next(), for: argument)
+            case "--ruby":
+                options.rubyPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-output-dir":
+                options.parserOutputDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--output-dir":
+                options.outputDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--debug-html":
+                options.writeDebugHTML = true
+            case "--help", "-h":
+                throw CLIError.usage(AppRunner.helpText)
+            default:
+                throw CLIError.usage("Unknown option: \(argument)")
+            }
+        }
+
+        return options
+    }
+
     private static func requireAllowed(_ option: InventoryOption, in allowed: Set<InventoryOption>, argument: String) throws {
         guard allowed.contains(option) else {
             throw CLIError.usage("Unsupported option for this command: \(argument)")
@@ -506,6 +620,20 @@ private struct ParserOptions {
     var rubyPath: String?
     var outputDirectoryPath: String?
     var debugHTMLDirectoryPath: String?
+}
+
+private struct ExportOptions {
+    var noteUUID: String?
+    var title: String?
+    var htmlPath: String?
+    var accountName: String?
+    var folderPath: String?
+    var notesContainerPath: String?
+    var parserScriptPath: String?
+    var rubyPath: String?
+    var parserOutputDirectoryPath: String?
+    var outputDirectoryPath: String?
+    var writeDebugHTML = false
 }
 
 private enum InventoryOption: Hashable {
