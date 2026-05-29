@@ -48,12 +48,19 @@ public struct AppleNotesInventoryFormatter {
         } ?? folders
 
         let folderPaths = FolderPathBuilder(folders: accountFolders).pathsByFolderID()
-        let allowedFolderIDs = try allowedFolders(
-            folderPath: folderPath,
-            recursive: recursive,
-            folders: accountFolders,
-            folderPaths: folderPaths
-        )
+        let allowedFolderIDs: Set<Int>?
+        if let folderPath {
+            guard let accountName else {
+                throw AppleNotesInventoryError.accountNotFound("<required when filtering by folder>")
+            }
+            let scope = try AppleNotesScopeResolver().resolve(
+                AppleNotesScopeRequest(accountName: accountName, folderPath: folderPath, recursive: recursive),
+                inventory: AppleNotesInventory(accounts: accounts, folders: folders, notes: notes)
+            )
+            allowedFolderIDs = scope.allowedFolderIDs
+        } else {
+            allowedFolderIDs = nil
+        }
 
         let filteredNotes = notes.filter { note in
             if let selectedAccount, note.accountObjectID != selectedAccount.objectID {
@@ -92,38 +99,6 @@ public struct AppleNotesInventoryFormatter {
         return account
     }
 
-    private func allowedFolders(
-        folderPath: String?,
-        recursive: Bool,
-        folders: [AppleNotesFolder],
-        folderPaths: [Int: String]
-    ) throws -> Set<Int>? {
-        guard let folderPath else {
-            return nil
-        }
-
-        guard let root = folders.first(where: { folderPaths[$0.objectID] == folderPath }) else {
-            throw AppleNotesInventoryError.folderNotFound(folderPath)
-        }
-
-        if recursive == false {
-            return [root.objectID]
-        }
-
-        let parentMap = Dictionary(grouping: folders, by: { $0.parentObjectID })
-        var result: Set<Int> = [root.objectID]
-        var stack = [root.objectID]
-
-        while let current = stack.popLast() {
-            for child in parentMap[current] ?? [] {
-                if result.insert(child.objectID).inserted {
-                    stack.append(child.objectID)
-                }
-            }
-        }
-
-        return result
-    }
 }
 
 public struct FolderPathBuilder {

@@ -123,4 +123,28 @@ final class AppRunnerTests: XCTestCase {
         XCTAssertTrue(recorder.stdout.contains("Nested fixture note"))
         XCTAssertFalse(recorder.stdout.contains("hello note body"))
     }
+
+    func testResolveScopeCommandPrintsAllowedFolders() throws {
+        let directory = try TemporaryDirectory()
+        let databaseURL = directory.url.appendingPathComponent("NoteStore.sqlite")
+        try SQLiteFixture.createAppleNotesLikeDatabase(at: databaseURL)
+
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: [
+                "resolve-scope",
+                "--account",
+                "iCloud",
+                "--folder",
+                "Capture",
+                "--recursive",
+                "--database",
+                databaseURL.path,
+            ])
+
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(recorder.stdout.contains("Resolved scope:"))
+        XCTAssertTrue(recorder.stdout.contains("Allowed folders: 2"))
+        XCTAssertTrue(recorder.stdout.contains("Capture/Sketches"))
+    }
 }

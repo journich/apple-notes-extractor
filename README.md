@@ -26,6 +26,7 @@ swift run notes2myicor inspect-schema
 swift run notes2myicor accounts
 swift run notes2myicor folders --account "iCloud"
 swift run notes2myicor notes --account "iCloud" --folder "Capture" --recursive
+swift run notes2myicor resolve-scope --account "iCloud" --folder "Capture" --recursive
 ```
 
 `notes2myicor init` creates a default JSON config at:
@@ -73,3 +74,11 @@ swift run notes2myicor notes --account "iCloud" --folder "Capture" --recursive
 ```
 
 These commands read account, folder, and note metadata only. They do not decompress or parse note bodies.
+
+Stage 3 adds duplicate-safe folder scope resolution:
+
+```bash
+swift run notes2myicor resolve-scope --account "iCloud" --folder "Capture" --recursive
+```
+
+The resolver uses account name plus full folder path, then returns the root folder and allowed descendant folder IDs.

@@ -68,6 +68,13 @@ public struct AppRunner {
                 folderPath: folderPath,
                 recursive: recursive
             ))
+        case .resolveScope(let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath):
+            let inventory = try readInventory(databasePath: databasePath, notesContainerPath: notesContainerPath)
+            let resolution = try AppleNotesScopeResolver().resolve(
+                AppleNotesScopeRequest(accountName: accountName, folderPath: folderPath, recursive: recursive),
+                inventory: inventory
+            )
+            output(ScopeResolutionFormatter().format(resolution))
         }
     }
 
@@ -106,6 +113,7 @@ public extension AppRunner {
       notes2myicor accounts [--database <path>] [--notes-container <path>]
       notes2myicor folders [--account <name>] [--database <path>] [--notes-container <path>]
       notes2myicor notes [--account <name>] [--folder <path>] [--recursive] [--database <path>] [--notes-container <path>]
+      notes2myicor resolve-scope --account <name> --folder <path> [--recursive] [--database <path>] [--notes-container <path>]
 
     Commands:
       accounts         List Apple Notes accounts.
@@ -113,6 +121,7 @@ public extension AppRunner {
       init             Create a default JSON config file.
       inspect-schema   Inspect the local Apple Notes SQLite schema read-only.
       notes            List Apple Notes note metadata.
+      resolve-scope    Resolve an account and folder path to allowed folder IDs.
       version          Print the application version.
 
     Options:
@@ -135,6 +144,7 @@ public enum CLICommand: Equatable, Sendable {
     case accounts(databasePath: String?, notesContainerPath: String?)
     case folders(accountName: String?, databasePath: String?, notesContainerPath: String?)
     case notes(accountName: String?, folderPath: String?, recursive: Bool, databasePath: String?, notesContainerPath: String?)
+    case resolveScope(accountName: String, folderPath: String, recursive: Bool, databasePath: String?, notesContainerPath: String?)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -161,6 +171,21 @@ public enum CLICommand: Equatable, Sendable {
             return .notes(
                 accountName: options.accountName,
                 folderPath: options.folderPath,
+                recursive: options.recursive,
+                databasePath: options.databasePath,
+                notesContainerPath: options.notesContainerPath
+            )
+        case "resolve-scope":
+            let options = try parseInventoryOptions(Array(arguments.dropFirst()), allowed: [.account, .folder, .recursive, .database, .notesContainer])
+            guard let accountName = options.accountName else {
+                throw CLIError.usage("Missing required option: --account")
+            }
+            guard let folderPath = options.folderPath else {
+                throw CLIError.usage("Missing required option: --folder")
+            }
+            return .resolveScope(
+                accountName: accountName,
+                folderPath: folderPath,
                 recursive: options.recursive,
                 databasePath: options.databasePath,
                 notesContainerPath: options.notesContainerPath
