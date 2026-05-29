@@ -147,4 +147,34 @@ final class AppRunnerTests: XCTestCase {
         XCTAssertTrue(recorder.stdout.contains("Allowed folders: 2"))
         XCTAssertTrue(recorder.stdout.contains("Capture/Sketches"))
     }
+
+    func testStatusCommandCreatesAndPrintsStateDatabaseStatus() throws {
+        let directory = try TemporaryDirectory()
+        let stateURL = directory.url.appendingPathComponent("state.sqlite")
+        let recorder = OutputRecorder()
+
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: ["status", "--state-db", stateURL.path])
+
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stateURL.path))
+        XCTAssertTrue(recorder.stdout.contains("State database:"))
+        XCTAssertTrue(recorder.stdout.contains("Schema version: 1"))
+    }
+
+    func testResetStateCommandDeletesRequestedNote() throws {
+        let directory = try TemporaryDirectory()
+        let stateURL = directory.url.appendingPathComponent("state.sqlite")
+        let database = try StateDatabase.open(at: stateURL)
+        try database.migrate()
+        try database.upsertNoteState(NoteState(noteUUID: "note-1", title: "Title", lastSeenAt: "now"))
+
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: ["reset-state", "--note-uuid", "note-1", "--state-db", stateURL.path])
+
+        XCTAssertEqual(code, 0)
+        XCTAssertNil(try database.noteState(noteUUID: "note-1"))
+        XCTAssertTrue(recorder.stdout.contains("Reset state for note: note-1"))
+    }
 }

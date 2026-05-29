@@ -75,6 +75,17 @@ public struct AppRunner {
                 inventory: inventory
             )
             output(ScopeResolutionFormatter().format(resolution))
+        case .status(let stateDatabasePath):
+            let url = stateDatabaseURL(stateDatabasePath)
+            let stateDatabase = try StateDatabase.open(at: url)
+            try stateDatabase.migrate()
+            output(StateDatabaseFormatter().formatStatus(try stateDatabase.status(), path: url.path))
+        case .resetState(let noteUUID, let stateDatabasePath):
+            let url = stateDatabaseURL(stateDatabasePath)
+            let stateDatabase = try StateDatabase.open(at: url)
+            try stateDatabase.migrate()
+            try stateDatabase.resetNoteState(noteUUID: noteUUID)
+            output("Reset state for note: \(noteUUID)")
         }
     }
 
@@ -99,6 +110,11 @@ public struct AppRunner {
 
         return AppleNotesPaths(paths: paths).noteStoreDatabaseURL
     }
+
+    private func stateDatabaseURL(_ path: String?) -> URL {
+        let paths = AppPaths(fileManager: fileManager, environment: environment)
+        return paths.expandPath(path ?? AppConfig.defaultConfig.paths.stateDatabase).standardizedFileURL
+    }
 }
 
 public extension AppRunner {
@@ -114,6 +130,8 @@ public extension AppRunner {
       notes2myicor folders [--account <name>] [--database <path>] [--notes-container <path>]
       notes2myicor notes [--account <name>] [--folder <path>] [--recursive] [--database <path>] [--notes-container <path>]
       notes2myicor resolve-scope --account <name> --folder <path> [--recursive] [--database <path>] [--notes-container <path>]
+      notes2myicor status [--state-db <path>]
+      notes2myicor reset-state --note-uuid <uuid> [--state-db <path>]
 
     Commands:
       accounts         List Apple Notes accounts.
@@ -121,7 +139,9 @@ public extension AppRunner {
       init             Create a default JSON config file.
       inspect-schema   Inspect the local Apple Notes SQLite schema read-only.
       notes            List Apple Notes note metadata.
+      reset-state      Remove one note from the local app state database.
       resolve-scope    Resolve an account and folder path to allowed folder IDs.
+      status           Print local app state database status.
       version          Print the application version.
 
     Options:
@@ -130,7 +150,9 @@ public extension AppRunner {
       --database          SQLite database path for schema inspection.
       --folder            Apple Notes folder path.
       --notes-container   Apple Notes group container path. Defaults to ~/Library/Group Containers/group.com.apple.notes.
+      --note-uuid         Apple Notes note UUID.
       --recursive         Include subfolders when used with notes and --folder.
+      --state-db          App-owned state database path.
       --force             Overwrite an existing config file when used with init.
       --help              Show this help.
     """
@@ -145,6 +167,8 @@ public enum CLICommand: Equatable, Sendable {
     case folders(accountName: String?, databasePath: String?, notesContainerPath: String?)
     case notes(accountName: String?, folderPath: String?, recursive: Bool, databasePath: String?, notesContainerPath: String?)
     case resolveScope(accountName: String, folderPath: String, recursive: Bool, databasePath: String?, notesContainerPath: String?)
+    case status(stateDatabasePath: String?)
+    case resetState(noteUUID: String, stateDatabasePath: String?)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -190,6 +214,15 @@ public enum CLICommand: Equatable, Sendable {
                 databasePath: options.databasePath,
                 notesContainerPath: options.notesContainerPath
             )
+        case "status":
+            let options = try parseStateOptions(Array(arguments.dropFirst()), requiresNoteUUID: false)
+            return .status(stateDatabasePath: options.stateDatabasePath)
+        case "reset-state":
+            let options = try parseStateOptions(Array(arguments.dropFirst()), requiresNoteUUID: true)
+            guard let noteUUID = options.noteUUID else {
+                throw CLIError.usage("Missing required option: --note-uuid")
+            }
+            return .resetState(noteUUID: noteUUID, stateDatabasePath: options.stateDatabasePath)
         default:
             throw CLIError.usage("Unknown command: \(first)")
         }
@@ -277,6 +310,30 @@ public enum CLICommand: Equatable, Sendable {
         return options
     }
 
+    private static func parseStateOptions(_ arguments: [String], requiresNoteUUID: Bool) throws -> StateOptions {
+        var options = StateOptions()
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            switch argument {
+            case "--state-db":
+                options.stateDatabasePath = try requireValue(iterator.next(), for: argument)
+            case "--note-uuid":
+                options.noteUUID = try requireValue(iterator.next(), for: argument)
+            case "--help", "-h":
+                throw CLIError.usage(AppRunner.helpText)
+            default:
+                throw CLIError.usage("Unknown option: \(argument)")
+            }
+        }
+
+        if requiresNoteUUID, options.noteUUID == nil {
+            throw CLIError.usage("Missing required option: --note-uuid")
+        }
+
+        return options
+    }
+
     private static func requireAllowed(_ option: InventoryOption, in allowed: Set<InventoryOption>, argument: String) throws {
         guard allowed.contains(option) else {
             throw CLIError.usage("Unsupported option for this command: \(argument)")
@@ -297,6 +354,11 @@ private struct InventoryOptions {
     var recursive = false
     var databasePath: String?
     var notesContainerPath: String?
+}
+
+private struct StateOptions {
+    var noteUUID: String?
+    var stateDatabasePath: String?
 }
 
 private enum InventoryOption: Hashable {

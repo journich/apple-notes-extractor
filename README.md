@@ -27,6 +27,7 @@ swift run notes2myicor accounts
 swift run notes2myicor folders --account "iCloud"
 swift run notes2myicor notes --account "iCloud" --folder "Capture" --recursive
 swift run notes2myicor resolve-scope --account "iCloud" --folder "Capture" --recursive
+swift run notes2myicor status
 ```
 
 `notes2myicor init` creates a default JSON config at:
@@ -82,3 +83,12 @@ swift run notes2myicor resolve-scope --account "iCloud" --folder "Capture" --rec
 ```
 
 The resolver uses account name plus full folder path, then returns the root folder and allowed descendant folder IDs.
+
+Stage 4 adds the app-owned state database:
+
+```bash
+swift run notes2myicor status
+swift run notes2myicor reset-state --note-uuid <uuid>
+```
+
+The state database is separate from Apple Notes and is safe for this app to create and update.
