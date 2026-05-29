@@ -175,6 +175,43 @@ public struct AppRunner {
                 )
             )
             output(NoteExportFormatter().format(result))
+        case .syncOnce(let dryRun, let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let stateDatabasePath):
+            let paths = AppPaths(fileManager: fileManager, environment: environment)
+            let notesContainer = notesContainerPath.map { paths.expandPath($0).standardizedFileURL }
+                ?? AppleNotesPaths(paths: paths).groupContainerURL
+            let parserOutputDirectory = paths.expandPath(parserOutputDirectoryPath ?? "~/Library/Application Support/Notes2MyICOR/acnp-output").standardizedFileURL
+            let outputDirectory = paths.expandPath(outputDirectoryPath ?? AppConfig.defaultConfig.paths.outputDirectory).standardizedFileURL
+            let stateURL = paths.expandPath(stateDatabasePath ?? AppConfig.defaultConfig.paths.stateDatabase).standardizedFileURL
+            let stateDatabase = try StateDatabase.open(at: stateURL)
+            let parser = AppleCloudNotesParser(config: AppleCloudNotesParserConfig(
+                rubyExecutablePath: rubyPath ?? "/opt/homebrew/opt/ruby/bin/ruby",
+                parserScriptPath: parserScriptPath ?? "../apple_cloud_notes_parser/notes_cloud_ripper.rb",
+                outputDirectory: parserOutputDirectory
+            ))
+            let engine = SyncEngine(
+                stateDatabase: stateDatabase,
+                parser: parser,
+                exporter: NoteExporter(pdfRenderer: pdfRenderer)
+            )
+            let summary = try engine.syncOnce(SyncRequest(
+                databaseURL: appleNotesDatabaseURL(databasePath: databasePath, notesContainerPath: notesContainer.path),
+                notesContainerURL: notesContainer,
+                scopeRequest: AppleNotesScopeRequest(
+                    accountName: accountName ?? AppConfig.defaultConfig.scope.accountName,
+                    folderPath: folderPath ?? AppConfig.defaultConfig.scope.folderPath,
+                    recursive: recursive ?? AppConfig.defaultConfig.scope.recursive
+                ),
+                parserOutputDirectory: parserOutputDirectory,
+                exportOptions: NoteExportOptions(
+                    outputDirectory: outputDirectory,
+                    mirrorFolderTree: AppConfig.defaultConfig.export.mirrorFolderTree,
+                    writeSidecarJSON: AppConfig.defaultConfig.export.writeSidecarJSON,
+                    writeDebugHTML: false
+                ),
+                missingGraceCount: AppConfig.defaultConfig.polling.missingScanGraceCount,
+                dryRun: dryRun
+            ))
+            output(SyncSummaryFormatter().format(summary))
         }
     }
 
@@ -225,6 +262,7 @@ public extension AppRunner {
       notes2myicor snapshot [--notes-container <path>] [--work-dir <path>]
       notes2myicor parse [--note-uuid <uuid>] [--notes-container <path>] [--parser-script <path>] [--ruby <path>] [--output-dir <path>] [--debug-html-dir <path>]
       notes2myicor export --note-uuid <uuid> [--html <path>] [--title <title>] [--output-dir <path>] [--debug-html]
+      notes2myicor sync --once [--dry-run] [--account <name>] [--folder <path>] [--recursive]
 
     Commands:
       accounts         List Apple Notes accounts.
@@ -238,6 +276,7 @@ public extension AppRunner {
       resolve-scope    Resolve an account and folder path to allowed folder IDs.
       scan             Classify current notes against local state without exporting.
       snapshot         Copy the Apple Notes store and asset folders into a work snapshot.
+      sync             Run one full scan, parse, and export pass.
       status           Print local app state database status.
       version          Print the application version.
 
@@ -259,6 +298,7 @@ public extension AppRunner {
       --title             Note title for HTML fixture export input.
       --work-dir          Snapshot work directory.
       --debug-html        Write rendered debug HTML next to the PDF when used with export.
+      --dry-run           Plan sync work without parsing, exporting, or updating state.
       --force             Overwrite an existing config file when used with init.
       --help              Show this help.
     """
@@ -279,6 +319,7 @@ public enum CLICommand: Equatable, Sendable {
     case snapshot(notesContainerPath: String?, workDirectoryPath: String?)
     case parse(noteUUID: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, outputDirectoryPath: String?, debugHTMLDirectoryPath: String?)
     case export(noteUUID: String, title: String?, htmlPath: String?, accountName: String?, folderPath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, writeDebugHTML: Bool)
+    case syncOnce(dryRun: Bool, accountName: String?, folderPath: String?, recursive: Bool?, databasePath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, stateDatabasePath: String?)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -379,6 +420,24 @@ public enum CLICommand: Equatable, Sendable {
                 parserOutputDirectoryPath: options.parserOutputDirectoryPath,
                 outputDirectoryPath: options.outputDirectoryPath,
                 writeDebugHTML: options.writeDebugHTML
+            )
+        case "sync":
+            let options = try parseSyncOptions(Array(arguments.dropFirst()))
+            guard options.once else {
+                throw CLIError.usage("Missing required option: --once")
+            }
+            return .syncOnce(
+                dryRun: options.dryRun,
+                accountName: options.accountName,
+                folderPath: options.folderPath,
+                recursive: options.recursive,
+                databasePath: options.databasePath,
+                notesContainerPath: options.notesContainerPath,
+                parserScriptPath: options.parserScriptPath,
+                rubyPath: options.rubyPath,
+                parserOutputDirectoryPath: options.parserOutputDirectoryPath,
+                outputDirectoryPath: options.outputDirectoryPath,
+                stateDatabasePath: options.stateDatabasePath
             )
         default:
             throw CLIError.usage("Unknown command: \(first)")
@@ -580,6 +639,46 @@ public enum CLICommand: Equatable, Sendable {
         return options
     }
 
+    private static func parseSyncOptions(_ arguments: [String]) throws -> SyncOptions {
+        var options = SyncOptions()
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            switch argument {
+            case "--once":
+                options.once = true
+            case "--dry-run":
+                options.dryRun = true
+            case "--account":
+                options.accountName = try requireValue(iterator.next(), for: argument)
+            case "--folder":
+                options.folderPath = try requireValue(iterator.next(), for: argument)
+            case "--recursive":
+                options.recursive = true
+            case "--database":
+                options.databasePath = try requireValue(iterator.next(), for: argument)
+            case "--notes-container":
+                options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-script":
+                options.parserScriptPath = try requireValue(iterator.next(), for: argument)
+            case "--ruby":
+                options.rubyPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-output-dir":
+                options.parserOutputDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--output-dir":
+                options.outputDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--state-db":
+                options.stateDatabasePath = try requireValue(iterator.next(), for: argument)
+            case "--help", "-h":
+                throw CLIError.usage(AppRunner.helpText)
+            default:
+                throw CLIError.usage("Unknown option: \(argument)")
+            }
+        }
+
+        return options
+    }
+
     private static func requireAllowed(_ option: InventoryOption, in allowed: Set<InventoryOption>, argument: String) throws {
         guard allowed.contains(option) else {
             throw CLIError.usage("Unsupported option for this command: \(argument)")
@@ -634,6 +733,21 @@ private struct ExportOptions {
     var parserOutputDirectoryPath: String?
     var outputDirectoryPath: String?
     var writeDebugHTML = false
+}
+
+private struct SyncOptions {
+    var once = false
+    var dryRun = false
+    var accountName: String?
+    var folderPath: String?
+    var recursive: Bool?
+    var databasePath: String?
+    var notesContainerPath: String?
+    var parserScriptPath: String?
+    var rubyPath: String?
+    var parserOutputDirectoryPath: String?
+    var outputDirectoryPath: String?
+    var stateDatabasePath: String?
 }
 
 private enum InventoryOption: Hashable {

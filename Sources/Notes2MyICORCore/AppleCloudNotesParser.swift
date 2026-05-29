@@ -12,6 +12,10 @@ public struct AppleCloudNotesParserConfig: Equatable, Sendable {
     }
 }
 
+public protocol NoteParsing {
+    func parse(notesContainer: URL, noteUUIDs: [String]) throws -> AppleCloudNotesParserResult
+}
+
 public struct ExternalCommandResult: Equatable, Sendable {
     public var exitCode: Int32
     public var standardOutput: String
@@ -181,6 +185,8 @@ public struct AppleCloudNotesParser {
         )
     }
 }
+
+extension AppleCloudNotesParser: NoteParsing {}
 
 public struct AppleCloudNotesJSONDecoder {
     public let fileManager: FileManager

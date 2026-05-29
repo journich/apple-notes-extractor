@@ -80,3 +80,12 @@ swift run notes2myicor export --note-uuid <uuid> --parser-script ../apple_cloud_
 ```
 
 The export command uses WebKit's native PDF renderer and writes sidecar JSON next to the PDF. Keep export output outside the repository unless it uses synthetic fixture data.
+
+Stage 10 can run one complete sync pass:
+
+```bash
+swift run notes2myicor sync --once --account "iCloud" --folder "Capture" --recursive --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
+swift run notes2myicor sync --once --dry-run --account "iCloud" --folder "Capture" --recursive
+```
+
+Use a temporary output directory while testing. Real sync output includes PDFs and sidecar JSON derived from note contents and must remain untracked.

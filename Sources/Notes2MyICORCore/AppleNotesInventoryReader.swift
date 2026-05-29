@@ -1,5 +1,9 @@
 import Foundation
 
+public protocol AppleNotesInventoryReading {
+    func readInventory(databaseURL: URL) throws -> AppleNotesInventory
+}
+
 public struct AppleNotesInventoryReader {
     public let fileManager: FileManager
 
@@ -134,6 +138,8 @@ public struct AppleNotesInventoryReader {
         return rawName
     }
 }
+
+extension AppleNotesInventoryReader: AppleNotesInventoryReading {}
 
 public enum AppleNotesInventoryError: Error, Equatable, LocalizedError {
     case missingEntity(String)

@@ -260,6 +260,15 @@ final class AppRunnerTests: XCTestCase {
         XCTAssertTrue(recorder.stdout.contains("Sidecar JSON:"))
         XCTAssertTrue(recorder.stdout.contains("Debug HTML:"))
     }
+
+    func testSyncCommandRequiresOnce() throws {
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: ["sync"])
+
+        XCTAssertEqual(code, 2)
+        XCTAssertTrue(recorder.stderr.contains("Missing required option: --once"))
+    }
 }
 
 private final class AppRunnerFakePDFRenderer: PDFRendering {

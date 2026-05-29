@@ -33,6 +33,8 @@ swift run notes2myicor snapshot
 swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb
 swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --debug-html-dir /tmp/notes2myicor-debug-html
 swift run notes2myicor export --note-uuid <uuid> --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
+swift run notes2myicor sync --once --account "iCloud" --folder "Capture" --recursive --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
+swift run notes2myicor sync --once --dry-run --account "iCloud" --folder "Capture" --recursive
 ```
 
 `notes2myicor init` creates a default JSON config at:
@@ -147,3 +149,12 @@ swift run notes2myicor export --note-uuid fixture-uuid --title "Fixture" --html 
 ```
 
 Exports write a PDF and sidecar JSON. `--debug-html` also writes the rendered HTML next to the PDF. Output files may contain note contents; keep test output local and untracked.
+
+Stage 10 adds the first full MVP sync command:
+
+```bash
+swift run notes2myicor sync --once --account "iCloud" --folder "Capture" --recursive --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
+swift run notes2myicor sync --once --dry-run --account "iCloud" --folder "Capture" --recursive
+```
+
+`sync --once` reads the Notes inventory, classifies changes, parses changed notes, writes PDFs and sidecar JSON, and updates the app-owned state database only after successful export. `--dry-run` reports planned work without parsing, exporting, or updating note state. Current sync state stores Apple Notes folder object IDs for change comparison; sidecar JSON and exported documents still use human folder paths.

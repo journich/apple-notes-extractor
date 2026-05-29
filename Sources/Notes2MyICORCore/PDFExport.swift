@@ -5,6 +5,10 @@ public protocol PDFRendering {
     func renderPDF(html: String, baseURL: URL?) throws -> Data
 }
 
+public protocol NoteExporting {
+    func export(document: NoteDocument, options: NoteExportOptions) throws -> NoteExportResult
+}
+
 public enum PDFRenderError: Error, Equatable, LocalizedError {
     case navigationFailed(String)
     case timeout(String)
@@ -356,6 +360,8 @@ public struct NoteExporter {
         return try writer.write(document: document, pdfData: pdfData, options: options)
     }
 }
+
+extension NoteExporter: NoteExporting {}
 
 public struct NoteExportFormatter {
     public init() {}
