@@ -45,23 +45,52 @@ public struct AppRunner {
             try ConfigStore(fileManager: fileManager).writeDefaultConfig(to: url, overwrite: force)
             output("Created config: \(url.path)")
         case .inspectSchema(let databasePath, let notesContainerPath):
-            let paths = AppPaths(fileManager: fileManager, environment: environment)
-            let databaseURL: URL
-
-            if let databasePath {
-                databaseURL = paths.expandPath(databasePath).standardizedFileURL
-            } else if let notesContainerPath {
-                databaseURL = paths
-                    .expandPath(notesContainerPath)
-                    .appendingPathComponent("NoteStore.sqlite")
-                    .standardizedFileURL
-            } else {
-                databaseURL = AppleNotesPaths(paths: paths).noteStoreDatabaseURL
-            }
-
+            let databaseURL = appleNotesDatabaseURL(databasePath: databasePath, notesContainerPath: notesContainerPath)
             let inspection = try AppleNotesSchemaInspector(fileManager: fileManager).inspect(databaseURL: databaseURL)
             output(SchemaInspectionFormatter().format(inspection))
+        case .accounts(let databasePath, let notesContainerPath):
+            let inventory = try readInventory(databasePath: databasePath, notesContainerPath: notesContainerPath)
+            output(AppleNotesInventoryFormatter().formatAccounts(inventory.accounts))
+        case .folders(let accountName, let databasePath, let notesContainerPath):
+            let inventory = try readInventory(databasePath: databasePath, notesContainerPath: notesContainerPath)
+            output(try AppleNotesInventoryFormatter().formatFolders(
+                inventory.folders,
+                accounts: inventory.accounts,
+                accountName: accountName
+            ))
+        case .notes(let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath):
+            let inventory = try readInventory(databasePath: databasePath, notesContainerPath: notesContainerPath)
+            output(try AppleNotesInventoryFormatter().formatNotes(
+                inventory.notes,
+                folders: inventory.folders,
+                accounts: inventory.accounts,
+                accountName: accountName,
+                folderPath: folderPath,
+                recursive: recursive
+            ))
         }
+    }
+
+    private func readInventory(databasePath: String?, notesContainerPath: String?) throws -> AppleNotesInventory {
+        let databaseURL = appleNotesDatabaseURL(databasePath: databasePath, notesContainerPath: notesContainerPath)
+        return try AppleNotesInventoryReader(fileManager: fileManager).readInventory(databaseURL: databaseURL)
+    }
+
+    private func appleNotesDatabaseURL(databasePath: String?, notesContainerPath: String?) -> URL {
+        let paths = AppPaths(fileManager: fileManager, environment: environment)
+
+        if let databasePath {
+            return paths.expandPath(databasePath).standardizedFileURL
+        }
+
+        if let notesContainerPath {
+            return paths
+                .expandPath(notesContainerPath)
+                .appendingPathComponent("NoteStore.sqlite")
+                .standardizedFileURL
+        }
+
+        return AppleNotesPaths(paths: paths).noteStoreDatabaseURL
     }
 }
 
@@ -74,16 +103,25 @@ public extension AppRunner {
       notes2myicor version
       notes2myicor init [--config <path>] [--force]
       notes2myicor inspect-schema [--database <path>] [--notes-container <path>]
+      notes2myicor accounts [--database <path>] [--notes-container <path>]
+      notes2myicor folders [--account <name>] [--database <path>] [--notes-container <path>]
+      notes2myicor notes [--account <name>] [--folder <path>] [--recursive] [--database <path>] [--notes-container <path>]
 
     Commands:
+      accounts         List Apple Notes accounts.
+      folders          List Apple Notes folders.
       init             Create a default JSON config file.
       inspect-schema   Inspect the local Apple Notes SQLite schema read-only.
+      notes            List Apple Notes note metadata.
       version          Print the application version.
 
     Options:
+      --account           Apple Notes account name.
       --config            Config file path. Defaults to ~/Library/Application Support/Notes2MyICOR/config.json.
       --database          SQLite database path for schema inspection.
+      --folder            Apple Notes folder path.
       --notes-container   Apple Notes group container path. Defaults to ~/Library/Group Containers/group.com.apple.notes.
+      --recursive         Include subfolders when used with notes and --folder.
       --force             Overwrite an existing config file when used with init.
       --help              Show this help.
     """
@@ -94,6 +132,9 @@ public enum CLICommand: Equatable, Sendable {
     case version
     case initConfig(configPath: String?, force: Bool)
     case inspectSchema(databasePath: String?, notesContainerPath: String?)
+    case accounts(databasePath: String?, notesContainerPath: String?)
+    case folders(accountName: String?, databasePath: String?, notesContainerPath: String?)
+    case notes(accountName: String?, folderPath: String?, recursive: Bool, databasePath: String?, notesContainerPath: String?)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -109,6 +150,21 @@ public enum CLICommand: Equatable, Sendable {
             return try parseInit(Array(arguments.dropFirst()))
         case "inspect-schema":
             return try parseInspectSchema(Array(arguments.dropFirst()))
+        case "accounts":
+            let options = try parseInventoryOptions(Array(arguments.dropFirst()), allowed: [.database, .notesContainer])
+            return .accounts(databasePath: options.databasePath, notesContainerPath: options.notesContainerPath)
+        case "folders":
+            let options = try parseInventoryOptions(Array(arguments.dropFirst()), allowed: [.account, .database, .notesContainer])
+            return .folders(accountName: options.accountName, databasePath: options.databasePath, notesContainerPath: options.notesContainerPath)
+        case "notes":
+            let options = try parseInventoryOptions(Array(arguments.dropFirst()), allowed: [.account, .folder, .recursive, .database, .notesContainer])
+            return .notes(
+                accountName: options.accountName,
+                folderPath: options.folderPath,
+                recursive: options.recursive,
+                databasePath: options.databasePath,
+                notesContainerPath: options.notesContainerPath
+            )
         default:
             throw CLIError.usage("Unknown command: \(first)")
         }
@@ -164,6 +220,66 @@ public enum CLICommand: Equatable, Sendable {
 
         return .inspectSchema(databasePath: databasePath, notesContainerPath: notesContainerPath)
     }
+
+    private static func parseInventoryOptions(_ arguments: [String], allowed: Set<InventoryOption>) throws -> InventoryOptions {
+        var options = InventoryOptions()
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            switch argument {
+            case "--account":
+                try requireAllowed(.account, in: allowed, argument: argument)
+                options.accountName = try requireValue(iterator.next(), for: argument)
+            case "--folder":
+                try requireAllowed(.folder, in: allowed, argument: argument)
+                options.folderPath = try requireValue(iterator.next(), for: argument)
+            case "--recursive":
+                try requireAllowed(.recursive, in: allowed, argument: argument)
+                options.recursive = true
+            case "--database":
+                try requireAllowed(.database, in: allowed, argument: argument)
+                options.databasePath = try requireValue(iterator.next(), for: argument)
+            case "--notes-container":
+                try requireAllowed(.notesContainer, in: allowed, argument: argument)
+                options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--help", "-h":
+                throw CLIError.usage(AppRunner.helpText)
+            default:
+                throw CLIError.usage("Unknown option: \(argument)")
+            }
+        }
+
+        return options
+    }
+
+    private static func requireAllowed(_ option: InventoryOption, in allowed: Set<InventoryOption>, argument: String) throws {
+        guard allowed.contains(option) else {
+            throw CLIError.usage("Unsupported option for this command: \(argument)")
+        }
+    }
+
+    private static func requireValue(_ value: String?, for argument: String) throws -> String {
+        guard let value, value.hasPrefix("--") == false else {
+            throw CLIError.usage("Missing value for \(argument)")
+        }
+        return value
+    }
+}
+
+private struct InventoryOptions {
+    var accountName: String?
+    var folderPath: String?
+    var recursive = false
+    var databasePath: String?
+    var notesContainerPath: String?
+}
+
+private enum InventoryOption: Hashable {
+    case account
+    case folder
+    case recursive
+    case database
+    case notesContainer
 }
 
 public enum CLIError: Error, Equatable, Sendable {

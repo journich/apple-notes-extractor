@@ -45,12 +45,11 @@ final class AppleNotesSchemaInspectorTests: XCTestCase {
         XCTAssertTrue(inspection.readOnlyURI.hasPrefix("file:"))
         XCTAssertTrue(inspection.tables.contains { $0.name == "ZICCLOUDSYNCINGOBJECT" })
         XCTAssertTrue(inspection.tables.contains { $0.name == "ZICNOTEDATA" })
-        XCTAssertEqual(inspection.keyTables["ZICCLOUDSYNCINGOBJECT"]?.columns.map(\.name), [
-            "Z_PK",
-            "ZIDENTIFIER",
-            "ZTITLE1",
-            "ZNOTEDATA",
-        ])
+        let cloudObjectColumns = inspection.keyTables["ZICCLOUDSYNCINGOBJECT"]?.columns.map(\.name) ?? []
+        XCTAssertTrue(cloudObjectColumns.contains("Z_PK"))
+        XCTAssertTrue(cloudObjectColumns.contains("ZIDENTIFIER"))
+        XCTAssertTrue(cloudObjectColumns.contains("ZTITLE1"))
+        XCTAssertTrue(cloudObjectColumns.contains("ZNOTEDATA"))
         XCTAssertEqual(inspection.keyTables["ZICNOTEDATA"]?.columns.map(\.name), [
             "Z_PK",
             "ZDATA",

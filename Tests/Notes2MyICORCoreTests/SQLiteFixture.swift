@@ -8,8 +8,21 @@ enum SQLiteFixture {
             sql: """
             CREATE TABLE ZICCLOUDSYNCINGOBJECT (
                 Z_PK INTEGER PRIMARY KEY,
+                Z_ENT INTEGER,
                 ZIDENTIFIER TEXT,
+                ZNAME TEXT,
+                ZACCOUNTNAMEFORACCOUNTLISTSORTING TEXT,
+                ZTITLE TEXT,
                 ZTITLE1 TEXT,
+                ZTITLE2 TEXT,
+                ZSNIPPET TEXT,
+                ZCREATIONDATE1 REAL,
+                ZMODIFICATIONDATE1 REAL,
+                ZACCOUNT7 INTEGER,
+                ZACCOUNT8 INTEGER,
+                ZOWNER INTEGER,
+                ZPARENT INTEGER,
+                ZFOLDER INTEGER,
                 ZNOTEDATA INTEGER
             );
 
@@ -18,11 +31,49 @@ enum SQLiteFixture {
                 ZDATA BLOB
             );
 
-            INSERT INTO ZICCLOUDSYNCINGOBJECT (Z_PK, ZIDENTIFIER, ZTITLE1, ZNOTEDATA)
-            VALUES (1, 'fixture-note-uuid', 'Fixture note', 1);
+            CREATE TABLE Z_PRIMARYKEY (
+                Z_ENT INTEGER PRIMARY KEY,
+                Z_NAME TEXT
+            );
+
+            INSERT INTO Z_PRIMARYKEY (Z_ENT, Z_NAME)
+            VALUES
+                (12, 'ICNote'),
+                (14, 'ICAccount'),
+                (15, 'ICFolder');
+
+            INSERT INTO ZICCLOUDSYNCINGOBJECT (Z_PK, Z_ENT, ZIDENTIFIER, ZNAME, ZACCOUNTNAMEFORACCOUNTLISTSORTING)
+            VALUES (100, 14, 'fixture-account-uuid', 'iCloud', '1_iCloud');
+
+            INSERT INTO ZICCLOUDSYNCINGOBJECT (Z_PK, Z_ENT, ZIDENTIFIER, ZTITLE2, ZACCOUNT8, ZOWNER)
+            VALUES
+                (200, 15, 'fixture-folder-root-uuid', 'Capture', 100, 100),
+                (201, 15, 'fixture-folder-child-uuid', 'Sketches', 100, 100);
+
+            UPDATE ZICCLOUDSYNCINGOBJECT
+            SET ZPARENT = 200
+            WHERE Z_PK = 201;
+
+            INSERT INTO ZICCLOUDSYNCINGOBJECT (
+                Z_PK,
+                Z_ENT,
+                ZIDENTIFIER,
+                ZTITLE1,
+                ZSNIPPET,
+                ZCREATIONDATE1,
+                ZMODIFICATIONDATE1,
+                ZACCOUNT7,
+                ZFOLDER,
+                ZNOTEDATA
+            )
+            VALUES
+                (300, 12, 'fixture-note-uuid', 'Fixture note', 'Fixture snippet', 0, 60, 100, 200, 1),
+                (301, 12, 'fixture-child-note-uuid', 'Nested fixture note', NULL, 0, 120, 100, 201, 2);
 
             INSERT INTO ZICNOTEDATA (Z_PK, ZDATA)
-            VALUES (1, X'68656C6C6F206E6F746520626F6479');
+            VALUES
+                (1, X'68656C6C6F206E6F746520626F6479'),
+                (2, X'6E657374656420626F6479');
             """
         )
     }

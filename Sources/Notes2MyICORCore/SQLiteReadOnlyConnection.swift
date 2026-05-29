@@ -122,8 +122,12 @@ public struct SQLiteRow: Equatable, Sendable {
     }
 
     public func int(_ name: String) -> Int {
+        optionalInt(name) ?? 0
+    }
+
+    public func optionalInt(_ name: String) -> Int? {
         guard let value = values[name] else {
-            return 0
+            return nil
         }
 
         switch value {
@@ -132,9 +136,26 @@ public struct SQLiteRow: Equatable, Sendable {
         case .real(let double):
             return Int(double)
         case .text(let string):
-            return Int(string) ?? 0
+            return Int(string)
         case .null, .blob:
-            return 0
+            return nil
+        }
+    }
+
+    public func optionalDouble(_ name: String) -> Double? {
+        guard let value = values[name] else {
+            return nil
+        }
+
+        switch value {
+        case .integer(let int):
+            return Double(int)
+        case .real(let double):
+            return double
+        case .text(let string):
+            return Double(string)
+        case .null, .blob:
+            return nil
         }
     }
 }

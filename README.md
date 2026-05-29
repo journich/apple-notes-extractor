@@ -23,6 +23,9 @@ swift run notes2myicor --help
 swift run notes2myicor version
 swift run notes2myicor init
 swift run notes2myicor inspect-schema
+swift run notes2myicor accounts
+swift run notes2myicor folders --account "iCloud"
+swift run notes2myicor notes --account "iCloud" --folder "Capture" --recursive
 ```
 
 `notes2myicor init` creates a default JSON config at:
@@ -60,3 +63,13 @@ swift run notes2myicor inspect-schema --database /path/to/NoteStore.sqlite
 ```
 
 The command opens SQLite in read-only URI mode, sets `PRAGMA query_only = ON`, and prints table/column metadata only. It does not read or print note bodies.
+
+Stage 2 adds metadata inventory commands:
+
+```bash
+swift run notes2myicor accounts
+swift run notes2myicor folders --account "iCloud"
+swift run notes2myicor notes --account "iCloud" --folder "Capture" --recursive
+```
+
+These commands read account, folder, and note metadata only. They do not decompress or parse note bodies.
