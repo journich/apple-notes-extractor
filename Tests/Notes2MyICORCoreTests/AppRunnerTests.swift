@@ -207,4 +207,20 @@ final class AppRunnerTests: XCTestCase {
         try stateDatabase.migrate()
         XCTAssertEqual(try stateDatabase.status().notesCount, 2)
     }
+
+    func testSnapshotCommandCreatesSnapshotInWorkDirectory() throws {
+        let directory = try TemporaryDirectory()
+        let source = directory.url.appendingPathComponent("group.com.apple.notes", isDirectory: true)
+        let work = directory.url.appendingPathComponent("work", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try Data("sqlite".utf8).write(to: source.appendingPathComponent("NoteStore.sqlite"))
+
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: ["snapshot", "--notes-container", source.path, "--work-dir", work.path])
+
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(recorder.stdout.contains("Snapshot created:"))
+        XCTAssertTrue(recorder.stdout.contains("NoteStore.sqlite"))
+    }
 }

@@ -29,6 +29,7 @@ swift run notes2myicor notes --account "iCloud" --folder "Capture" --recursive
 swift run notes2myicor resolve-scope --account "iCloud" --folder "Capture" --recursive
 swift run notes2myicor status
 swift run notes2myicor scan --account "iCloud" --folder "Capture" --recursive
+swift run notes2myicor snapshot
 ```
 
 `notes2myicor init` creates a default JSON config at:
@@ -101,3 +102,11 @@ swift run notes2myicor scan --account "iCloud" --folder "Capture" --recursive
 ```
 
 The scan command classifies notes as new, modified, unchanged, out of scope, missing, or previously failed. It does not parse note bodies and does not export PDFs.
+
+Stage 6 adds snapshot creation:
+
+```bash
+swift run notes2myicor snapshot
+```
+
+Snapshots copy `NoteStore.sqlite`, WAL/SHM files when present, and known asset folders into the configured work directory. They never write into the live Apple Notes container.

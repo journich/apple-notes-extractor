@@ -94,6 +94,16 @@ public struct AppRunner {
                 missingGraceCount: AppConfig.defaultConfig.polling.missingScanGraceCount
             )
             output(ScanSummaryFormatter().format(summary))
+        case .snapshot(let notesContainerPath, let workDirectoryPath):
+            let paths = AppPaths(fileManager: fileManager, environment: environment)
+            let source = notesContainerPath.map { paths.expandPath($0).standardizedFileURL }
+                ?? AppleNotesPaths(paths: paths).groupContainerURL
+            let work = paths.expandPath(workDirectoryPath ?? AppConfig.defaultConfig.paths.workDirectory).standardizedFileURL
+            let snapshot = try AppleNotesSnapshotter(fileManager: fileManager).createSnapshot(
+                sourceContainer: source,
+                workDirectory: work
+            )
+            output(SnapshotFormatter().format(snapshot))
         }
     }
 
@@ -141,6 +151,7 @@ public extension AppRunner {
       notes2myicor status [--state-db <path>]
       notes2myicor reset-state --note-uuid <uuid> [--state-db <path>]
       notes2myicor scan --account <name> --folder <path> [--recursive] [--database <path>] [--notes-container <path>] [--state-db <path>]
+      notes2myicor snapshot [--notes-container <path>] [--work-dir <path>]
 
     Commands:
       accounts         List Apple Notes accounts.
@@ -151,6 +162,7 @@ public extension AppRunner {
       reset-state      Remove one note from the local app state database.
       resolve-scope    Resolve an account and folder path to allowed folder IDs.
       scan             Classify current notes against local state without exporting.
+      snapshot         Copy the Apple Notes store and asset folders into a work snapshot.
       status           Print local app state database status.
       version          Print the application version.
 
@@ -163,6 +175,7 @@ public extension AppRunner {
       --note-uuid         Apple Notes note UUID.
       --recursive         Include subfolders when used with notes and --folder.
       --state-db          App-owned state database path.
+      --work-dir          Snapshot work directory.
       --force             Overwrite an existing config file when used with init.
       --help              Show this help.
     """
@@ -180,6 +193,7 @@ public enum CLICommand: Equatable, Sendable {
     case status(stateDatabasePath: String?)
     case resetState(noteUUID: String, stateDatabasePath: String?)
     case scan(accountName: String, folderPath: String, recursive: Bool, databasePath: String?, notesContainerPath: String?, stateDatabasePath: String?)
+    case snapshot(notesContainerPath: String?, workDirectoryPath: String?)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -250,6 +264,9 @@ public enum CLICommand: Equatable, Sendable {
                 notesContainerPath: options.notesContainerPath,
                 stateDatabasePath: options.stateDatabasePath
             )
+        case "snapshot":
+            let options = try parseSnapshotOptions(Array(arguments.dropFirst()))
+            return .snapshot(notesContainerPath: options.notesContainerPath, workDirectoryPath: options.workDirectoryPath)
         default:
             throw CLIError.usage("Unknown command: \(first)")
         }
@@ -364,6 +381,26 @@ public enum CLICommand: Equatable, Sendable {
         return options
     }
 
+    private static func parseSnapshotOptions(_ arguments: [String]) throws -> SnapshotOptions {
+        var options = SnapshotOptions()
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            switch argument {
+            case "--notes-container":
+                options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--work-dir":
+                options.workDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--help", "-h":
+                throw CLIError.usage(AppRunner.helpText)
+            default:
+                throw CLIError.usage("Unknown option: \(argument)")
+            }
+        }
+
+        return options
+    }
+
     private static func requireAllowed(_ option: InventoryOption, in allowed: Set<InventoryOption>, argument: String) throws {
         guard allowed.contains(option) else {
             throw CLIError.usage("Unsupported option for this command: \(argument)")
@@ -390,6 +427,11 @@ private struct InventoryOptions {
 private struct StateOptions {
     var noteUUID: String?
     var stateDatabasePath: String?
+}
+
+private struct SnapshotOptions {
+    var notesContainerPath: String?
+    var workDirectoryPath: String?
 }
 
 private enum InventoryOption: Hashable {
