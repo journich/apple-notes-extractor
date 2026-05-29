@@ -7,6 +7,11 @@ public struct NoteState: Equatable, Sendable {
     public var exportStatus: String
     public var pdfPath: String?
     public var contentHash: String?
+    public var modifiedCoreData: Double?
+    public var folderPath: String?
+    public var missingScanCount: Int
+    public var isDeleted: Bool
+    public var isInScope: Bool
     public var lastSeenAt: String
 
     public init(
@@ -15,6 +20,11 @@ public struct NoteState: Equatable, Sendable {
         exportStatus: String = "pending",
         pdfPath: String? = nil,
         contentHash: String? = nil,
+        modifiedCoreData: Double? = nil,
+        folderPath: String? = nil,
+        missingScanCount: Int = 0,
+        isDeleted: Bool = false,
+        isInScope: Bool = true,
         lastSeenAt: String
     ) {
         self.noteUUID = noteUUID
@@ -22,7 +32,28 @@ public struct NoteState: Equatable, Sendable {
         self.exportStatus = exportStatus
         self.pdfPath = pdfPath
         self.contentHash = contentHash
+        self.modifiedCoreData = modifiedCoreData
+        self.folderPath = folderPath
+        self.missingScanCount = missingScanCount
+        self.isDeleted = isDeleted
+        self.isInScope = isInScope
         self.lastSeenAt = lastSeenAt
+    }
+
+    init(row: SQLiteRow) {
+        self.init(
+            noteUUID: row.string("note_uuid"),
+            title: row.optionalString("title"),
+            exportStatus: row.string("export_status"),
+            pdfPath: row.optionalString("pdf_path"),
+            contentHash: row.optionalString("content_hash"),
+            modifiedCoreData: row.optionalDouble("modified_coredata"),
+            folderPath: row.optionalString("folder_path"),
+            missingScanCount: row.int("missing_scan_count"),
+            isDeleted: row.int("is_deleted") != 0,
+            isInScope: row.int("is_in_scope") != 0,
+            lastSeenAt: row.string("last_seen_at")
+        )
     }
 }
 
@@ -223,13 +254,30 @@ public final class StateDatabase {
     public func upsertNoteState(_ state: NoteState) throws {
         try executePrepared(
             """
-            INSERT INTO notes_state (note_uuid, title, export_status, pdf_path, content_hash, last_seen_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO notes_state (
+                note_uuid,
+                title,
+                export_status,
+                pdf_path,
+                content_hash,
+                modified_coredata,
+                folder_path,
+                missing_scan_count,
+                is_deleted,
+                is_in_scope,
+                last_seen_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(note_uuid) DO UPDATE SET
                 title = excluded.title,
                 export_status = excluded.export_status,
                 pdf_path = excluded.pdf_path,
                 content_hash = excluded.content_hash,
+                modified_coredata = excluded.modified_coredata,
+                folder_path = excluded.folder_path,
+                missing_scan_count = excluded.missing_scan_count,
+                is_deleted = excluded.is_deleted,
+                is_in_scope = excluded.is_in_scope,
                 last_seen_at = excluded.last_seen_at;
             """,
             bindings: [
@@ -238,6 +286,11 @@ public final class StateDatabase {
                 .text(state.exportStatus),
                 .optionalText(state.pdfPath),
                 .optionalText(state.contentHash),
+                .optionalDouble(state.modifiedCoreData),
+                .optionalText(state.folderPath),
+                .int(state.missingScanCount),
+                .int(state.isDeleted ? 1 : 0),
+                .int(state.isInScope ? 1 : 0),
                 .text(state.lastSeenAt),
             ]
         )
@@ -246,7 +299,18 @@ public final class StateDatabase {
     public func noteState(noteUUID: String) throws -> NoteState? {
         let rows = try queryPrepared(
             """
-            SELECT note_uuid, title, export_status, pdf_path, content_hash, last_seen_at
+            SELECT
+                note_uuid,
+                title,
+                export_status,
+                pdf_path,
+                content_hash,
+                modified_coredata,
+                folder_path,
+                missing_scan_count,
+                is_deleted,
+                is_in_scope,
+                last_seen_at
             FROM notes_state
             WHERE note_uuid = ?;
             """,
@@ -258,13 +322,31 @@ public final class StateDatabase {
         }
 
         return NoteState(
-            noteUUID: row.string("note_uuid"),
-            title: row.optionalString("title"),
-            exportStatus: row.string("export_status"),
-            pdfPath: row.optionalString("pdf_path"),
-            contentHash: row.optionalString("content_hash"),
-            lastSeenAt: row.string("last_seen_at")
+            row: row
         )
+    }
+
+    public func loadAllNoteStates() throws -> [NoteState] {
+        let rows = try query(
+            """
+            SELECT
+                note_uuid,
+                title,
+                export_status,
+                pdf_path,
+                content_hash,
+                modified_coredata,
+                folder_path,
+                missing_scan_count,
+                is_deleted,
+                is_in_scope,
+                last_seen_at
+            FROM notes_state
+            ORDER BY note_uuid;
+            """
+        )
+
+        return rows.map(NoteState.init(row:))
     }
 
     public func resetNoteState(noteUUID: String) throws {
@@ -407,6 +489,8 @@ public final class StateDatabase {
                 result = sqlite3_bind_text(statement, index, value, -1, SQLITE_TRANSIENT)
             case .int(let value):
                 result = sqlite3_bind_int64(statement, index, sqlite3_int64(value))
+            case .double(let value):
+                result = sqlite3_bind_double(statement, index, value)
             }
 
             guard result == SQLITE_OK else {
@@ -420,9 +504,14 @@ private enum SQLiteBinding {
     case null
     case text(String)
     case int(Int)
+    case double(Double)
 
     static func optionalText(_ value: String?) -> SQLiteBinding {
         value.map(SQLiteBinding.text) ?? .null
+    }
+
+    static func optionalDouble(_ value: Double?) -> SQLiteBinding {
+        value.map(SQLiteBinding.double) ?? .null
     }
 }
 

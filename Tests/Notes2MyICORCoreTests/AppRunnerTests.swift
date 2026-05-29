@@ -177,4 +177,34 @@ final class AppRunnerTests: XCTestCase {
         XCTAssertNil(try database.noteState(noteUUID: "note-1"))
         XCTAssertTrue(recorder.stdout.contains("Reset state for note: note-1"))
     }
+
+    func testScanCommandPrintsSummaryAndUpdatesState() throws {
+        let directory = try TemporaryDirectory()
+        let databaseURL = directory.url.appendingPathComponent("NoteStore.sqlite")
+        let stateURL = directory.url.appendingPathComponent("state.sqlite")
+        try SQLiteFixture.createAppleNotesLikeDatabase(at: databaseURL)
+
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: [
+                "scan",
+                "--account",
+                "iCloud",
+                "--folder",
+                "Capture",
+                "--recursive",
+                "--database",
+                databaseURL.path,
+                "--state-db",
+                stateURL.path,
+            ])
+
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(recorder.stdout.contains("Scan summary:"))
+        XCTAssertTrue(recorder.stdout.contains("NEW: 2"))
+
+        let stateDatabase = try StateDatabase.open(at: stateURL)
+        try stateDatabase.migrate()
+        XCTAssertEqual(try stateDatabase.status().notesCount, 2)
+    }
 }

@@ -86,6 +86,14 @@ public struct AppRunner {
             try stateDatabase.migrate()
             try stateDatabase.resetNoteState(noteUUID: noteUUID)
             output("Reset state for note: \(noteUUID)")
+        case .scan(let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let stateDatabasePath):
+            let stateDatabase = try StateDatabase.open(at: stateDatabaseURL(stateDatabasePath))
+            let summary = try ScanEngine(stateDatabase: stateDatabase).scan(
+                databaseURL: appleNotesDatabaseURL(databasePath: databasePath, notesContainerPath: notesContainerPath),
+                scopeRequest: AppleNotesScopeRequest(accountName: accountName, folderPath: folderPath, recursive: recursive),
+                missingGraceCount: AppConfig.defaultConfig.polling.missingScanGraceCount
+            )
+            output(ScanSummaryFormatter().format(summary))
         }
     }
 
@@ -132,6 +140,7 @@ public extension AppRunner {
       notes2myicor resolve-scope --account <name> --folder <path> [--recursive] [--database <path>] [--notes-container <path>]
       notes2myicor status [--state-db <path>]
       notes2myicor reset-state --note-uuid <uuid> [--state-db <path>]
+      notes2myicor scan --account <name> --folder <path> [--recursive] [--database <path>] [--notes-container <path>] [--state-db <path>]
 
     Commands:
       accounts         List Apple Notes accounts.
@@ -141,6 +150,7 @@ public extension AppRunner {
       notes            List Apple Notes note metadata.
       reset-state      Remove one note from the local app state database.
       resolve-scope    Resolve an account and folder path to allowed folder IDs.
+      scan             Classify current notes against local state without exporting.
       status           Print local app state database status.
       version          Print the application version.
 
@@ -169,6 +179,7 @@ public enum CLICommand: Equatable, Sendable {
     case resolveScope(accountName: String, folderPath: String, recursive: Bool, databasePath: String?, notesContainerPath: String?)
     case status(stateDatabasePath: String?)
     case resetState(noteUUID: String, stateDatabasePath: String?)
+    case scan(accountName: String, folderPath: String, recursive: Bool, databasePath: String?, notesContainerPath: String?, stateDatabasePath: String?)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -223,6 +234,22 @@ public enum CLICommand: Equatable, Sendable {
                 throw CLIError.usage("Missing required option: --note-uuid")
             }
             return .resetState(noteUUID: noteUUID, stateDatabasePath: options.stateDatabasePath)
+        case "scan":
+            let options = try parseInventoryOptions(Array(arguments.dropFirst()), allowed: [.account, .folder, .recursive, .database, .notesContainer, .stateDatabase])
+            guard let accountName = options.accountName else {
+                throw CLIError.usage("Missing required option: --account")
+            }
+            guard let folderPath = options.folderPath else {
+                throw CLIError.usage("Missing required option: --folder")
+            }
+            return .scan(
+                accountName: accountName,
+                folderPath: folderPath,
+                recursive: options.recursive,
+                databasePath: options.databasePath,
+                notesContainerPath: options.notesContainerPath,
+                stateDatabasePath: options.stateDatabasePath
+            )
         default:
             throw CLIError.usage("Unknown command: \(first)")
         }
@@ -300,6 +327,9 @@ public enum CLICommand: Equatable, Sendable {
             case "--notes-container":
                 try requireAllowed(.notesContainer, in: allowed, argument: argument)
                 options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--state-db":
+                try requireAllowed(.stateDatabase, in: allowed, argument: argument)
+                options.stateDatabasePath = try requireValue(iterator.next(), for: argument)
             case "--help", "-h":
                 throw CLIError.usage(AppRunner.helpText)
             default:
@@ -354,6 +384,7 @@ private struct InventoryOptions {
     var recursive = false
     var databasePath: String?
     var notesContainerPath: String?
+    var stateDatabasePath: String?
 }
 
 private struct StateOptions {
@@ -367,6 +398,7 @@ private enum InventoryOption: Hashable {
     case recursive
     case database
     case notesContainer
+    case stateDatabase
 }
 
 public enum CLIError: Error, Equatable, Sendable {

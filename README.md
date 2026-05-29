@@ -28,6 +28,7 @@ swift run notes2myicor folders --account "iCloud"
 swift run notes2myicor notes --account "iCloud" --folder "Capture" --recursive
 swift run notes2myicor resolve-scope --account "iCloud" --folder "Capture" --recursive
 swift run notes2myicor status
+swift run notes2myicor scan --account "iCloud" --folder "Capture" --recursive
 ```
 
 `notes2myicor init` creates a default JSON config at:
@@ -92,3 +93,11 @@ swift run notes2myicor reset-state --note-uuid <uuid>
 ```
 
 The state database is separate from Apple Notes and is safe for this app to create and update.
+
+Stage 5 adds metadata-only change classification:
+
+```bash
+swift run notes2myicor scan --account "iCloud" --folder "Capture" --recursive
+```
+
+The scan command classifies notes as new, modified, unchanged, out of scope, missing, or previously failed. It does not parse note bodies and does not export PDFs.
