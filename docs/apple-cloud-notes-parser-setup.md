@@ -45,7 +45,7 @@ Example with Homebrew Ruby:
 brew install ruby
 cd ../apple_cloud_notes_parser
 /opt/homebrew/opt/ruby/bin/gem install bundler
-/opt/homebrew/opt/ruby/bin/bundle install
+/opt/homebrew/opt/ruby/bin/ruby -S bundle install
 ```
 
 After setup, verify:
@@ -53,8 +53,11 @@ After setup, verify:
 ```bash
 cd ../apple_cloud_notes_parser
 /opt/homebrew/opt/ruby/bin/ruby --version
-/opt/homebrew/opt/ruby/bin/bundle exec ruby notes_cloud_ripper.rb --help
+/opt/homebrew/opt/ruby/bin/gem install logger
+/opt/homebrew/opt/ruby/bin/ruby notes_cloud_ripper.rb --help
 ```
+
+Use the explicit Homebrew Ruby path. On macOS, plain `ruby`, `gem`, and `bundle` may still resolve to the system Ruby 2.6 even after Homebrew Ruby is installed.
 
 Once this works, Stage 7 can continue by configuring `notes2myicor` to call:
 

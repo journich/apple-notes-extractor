@@ -104,6 +104,18 @@ public struct AppRunner {
                 workDirectory: work
             )
             output(SnapshotFormatter().format(snapshot))
+        case .parse(let noteUUID, let notesContainerPath, let parserScriptPath, let rubyPath, let outputDirectoryPath):
+            let paths = AppPaths(fileManager: fileManager, environment: environment)
+            let source = notesContainerPath.map { paths.expandPath($0).standardizedFileURL }
+                ?? AppleNotesPaths(paths: paths).groupContainerURL
+            let outputDirectory = paths.expandPath(outputDirectoryPath ?? "~/Library/Application Support/Notes2MyICOR/acnp-output").standardizedFileURL
+            let parser = AppleCloudNotesParser(config: AppleCloudNotesParserConfig(
+                rubyExecutablePath: rubyPath ?? "/opt/homebrew/opt/ruby/bin/ruby",
+                parserScriptPath: parserScriptPath ?? "../apple_cloud_notes_parser/notes_cloud_ripper.rb",
+                outputDirectory: outputDirectory
+            ))
+            let result = try parser.parse(notesContainer: source, noteUUIDs: noteUUID.map { [$0] } ?? [])
+            output(AppleCloudNotesParserFormatter().format(result))
         }
     }
 
@@ -152,6 +164,7 @@ public extension AppRunner {
       notes2myicor reset-state --note-uuid <uuid> [--state-db <path>]
       notes2myicor scan --account <name> --folder <path> [--recursive] [--database <path>] [--notes-container <path>] [--state-db <path>]
       notes2myicor snapshot [--notes-container <path>] [--work-dir <path>]
+      notes2myicor parse [--note-uuid <uuid>] [--notes-container <path>] [--parser-script <path>] [--ruby <path>] [--output-dir <path>]
 
     Commands:
       accounts         List Apple Notes accounts.
@@ -159,6 +172,7 @@ public extension AppRunner {
       init             Create a default JSON config file.
       inspect-schema   Inspect the local Apple Notes SQLite schema read-only.
       notes            List Apple Notes note metadata.
+      parse            Run Apple Cloud Notes Parser and decode its JSON output.
       reset-state      Remove one note from the local app state database.
       resolve-scope    Resolve an account and folder path to allowed folder IDs.
       scan             Classify current notes against local state without exporting.
@@ -173,7 +187,10 @@ public extension AppRunner {
       --folder            Apple Notes folder path.
       --notes-container   Apple Notes group container path. Defaults to ~/Library/Group Containers/group.com.apple.notes.
       --note-uuid         Apple Notes note UUID.
+      --output-dir        Parser output directory.
+      --parser-script     Apple Cloud Notes Parser notes_cloud_ripper.rb path.
       --recursive         Include subfolders when used with notes and --folder.
+      --ruby              Ruby executable path for Apple Cloud Notes Parser.
       --state-db          App-owned state database path.
       --work-dir          Snapshot work directory.
       --force             Overwrite an existing config file when used with init.
@@ -194,6 +211,7 @@ public enum CLICommand: Equatable, Sendable {
     case resetState(noteUUID: String, stateDatabasePath: String?)
     case scan(accountName: String, folderPath: String, recursive: Bool, databasePath: String?, notesContainerPath: String?, stateDatabasePath: String?)
     case snapshot(notesContainerPath: String?, workDirectoryPath: String?)
+    case parse(noteUUID: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, outputDirectoryPath: String?)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -267,6 +285,15 @@ public enum CLICommand: Equatable, Sendable {
         case "snapshot":
             let options = try parseSnapshotOptions(Array(arguments.dropFirst()))
             return .snapshot(notesContainerPath: options.notesContainerPath, workDirectoryPath: options.workDirectoryPath)
+        case "parse":
+            let options = try parseParserOptions(Array(arguments.dropFirst()))
+            return .parse(
+                noteUUID: options.noteUUID,
+                notesContainerPath: options.notesContainerPath,
+                parserScriptPath: options.parserScriptPath,
+                rubyPath: options.rubyPath,
+                outputDirectoryPath: options.outputDirectoryPath
+            )
         default:
             throw CLIError.usage("Unknown command: \(first)")
         }
@@ -401,6 +428,32 @@ public enum CLICommand: Equatable, Sendable {
         return options
     }
 
+    private static func parseParserOptions(_ arguments: [String]) throws -> ParserOptions {
+        var options = ParserOptions()
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            switch argument {
+            case "--note-uuid":
+                options.noteUUID = try requireValue(iterator.next(), for: argument)
+            case "--notes-container":
+                options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-script":
+                options.parserScriptPath = try requireValue(iterator.next(), for: argument)
+            case "--ruby":
+                options.rubyPath = try requireValue(iterator.next(), for: argument)
+            case "--output-dir":
+                options.outputDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--help", "-h":
+                throw CLIError.usage(AppRunner.helpText)
+            default:
+                throw CLIError.usage("Unknown option: \(argument)")
+            }
+        }
+
+        return options
+    }
+
     private static func requireAllowed(_ option: InventoryOption, in allowed: Set<InventoryOption>, argument: String) throws {
         guard allowed.contains(option) else {
             throw CLIError.usage("Unsupported option for this command: \(argument)")
@@ -432,6 +485,14 @@ private struct StateOptions {
 private struct SnapshotOptions {
     var notesContainerPath: String?
     var workDirectoryPath: String?
+}
+
+private struct ParserOptions {
+    var noteUUID: String?
+    var notesContainerPath: String?
+    var parserScriptPath: String?
+    var rubyPath: String?
+    var outputDirectoryPath: String?
 }
 
 private enum InventoryOption: Hashable {

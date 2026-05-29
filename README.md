@@ -30,6 +30,7 @@ swift run notes2myicor resolve-scope --account "iCloud" --folder "Capture" --rec
 swift run notes2myicor status
 swift run notes2myicor scan --account "iCloud" --folder "Capture" --recursive
 swift run notes2myicor snapshot
+swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb
 ```
 
 `notes2myicor init` creates a default JSON config at:
@@ -110,3 +111,11 @@ swift run notes2myicor snapshot
 ```
 
 Snapshots copy `NoteStore.sqlite`, WAL/SHM files when present, and known asset folders into the configured work directory. They never write into the live Apple Notes container.
+
+Stage 7 adds Apple Cloud Notes Parser integration:
+
+```bash
+swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb
+```
+
+By default the parser is run with Homebrew Ruby at `/opt/homebrew/opt/ruby/bin/ruby`, and its JSON output is decoded from `notes_rip/json/all_notes_1.json`.

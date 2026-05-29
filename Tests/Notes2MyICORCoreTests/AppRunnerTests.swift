@@ -223,4 +223,13 @@ final class AppRunnerTests: XCTestCase {
         XCTAssertTrue(recorder.stdout.contains("Snapshot created:"))
         XCTAssertTrue(recorder.stdout.contains("NoteStore.sqlite"))
     }
+
+    func testParseCommandReportsMissingParserScript() throws {
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: ["parse", "--parser-script", "/missing/parser.rb"])
+
+        XCTAssertEqual(code, 1)
+        XCTAssertTrue(recorder.stderr.contains("Parser script not found"))
+    }
 }
