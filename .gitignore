@@ -1,0 +1,31 @@
+.DS_Store
+
+# Local Apple Notes data and parser snapshots must never be committed.
+NoteStore.sqlite
+NoteStore.sqlite-*
+group.com.apple.notes/
+Media/
+FallbackImages/
+Previews/
+
+# Local app/runtime state.
+.build/
+.swiftpm/
+*.sqlite
+*.sqlite-*
+*.db
+*.log
+*.pid
+work/
+tmp/
+output/
+exports/
+acnp-output/
+
+# Local config and secrets.
+.env
+.env.*
+*.local
+config.toml
+config.json
+secrets.*
