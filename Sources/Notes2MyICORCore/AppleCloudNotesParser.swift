@@ -247,12 +247,19 @@ public struct AppleCloudNotesJSONDecoder {
 public struct AppleCloudNotesParserFormatter {
     public init() {}
 
-    public func format(_ result: AppleCloudNotesParserResult) -> String {
-        """
+    public func format(
+        _ result: AppleCloudNotesParserResult,
+        documents: [NoteDocument] = [],
+        debugHTMLURLs: [URL] = []
+    ) -> String {
+        let documentLine = documents.isEmpty ? "" : "\nNote documents: \(documents.count)"
+        let debugLine = debugHTMLURLs.isEmpty ? "" : "\nDebug HTML files: \(debugHTMLURLs.count)"
+        return """
         Apple Cloud Notes Parser result:
         Output directory: \(result.outputDirectory.path)
         JSON: \(result.jsonPath.path)
         Parsed notes: \(result.notes.count)
+        \(documentLine)\(debugLine)
         """
     }
 }

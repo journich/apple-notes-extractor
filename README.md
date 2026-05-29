@@ -31,6 +31,7 @@ swift run notes2myicor status
 swift run notes2myicor scan --account "iCloud" --folder "Capture" --recursive
 swift run notes2myicor snapshot
 swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb
+swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --debug-html-dir /tmp/notes2myicor-debug-html
 ```
 
 `notes2myicor init` creates a default JSON config at:
@@ -119,3 +120,13 @@ swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_c
 ```
 
 By default the parser is run with Homebrew Ruby at `/opt/homebrew/opt/ruby/bin/ruby`, and its JSON output is decoded from `notes_rip/json/all_notes_1.json`.
+
+Stage 8 adds the internal `NoteDocument` model used by later PDF export stages. Parser output is normalized into note documents with metadata slots, asset references, warnings, renderable HTML, and SHA-256 content hashes.
+
+To write renderable debug HTML while testing parser output, provide a temporary output directory:
+
+```bash
+swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --debug-html-dir /tmp/notes2myicor-debug-html
+```
+
+Debug HTML may contain note contents. Keep debug output local and untracked.

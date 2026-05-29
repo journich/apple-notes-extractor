@@ -104,7 +104,7 @@ public struct AppRunner {
                 workDirectory: work
             )
             output(SnapshotFormatter().format(snapshot))
-        case .parse(let noteUUID, let notesContainerPath, let parserScriptPath, let rubyPath, let outputDirectoryPath):
+        case .parse(let noteUUID, let notesContainerPath, let parserScriptPath, let rubyPath, let outputDirectoryPath, let debugHTMLDirectoryPath):
             let paths = AppPaths(fileManager: fileManager, environment: environment)
             let source = notesContainerPath.map { paths.expandPath($0).standardizedFileURL }
                 ?? AppleNotesPaths(paths: paths).groupContainerURL
@@ -115,7 +115,15 @@ public struct AppRunner {
                 outputDirectory: outputDirectory
             ))
             let result = try parser.parse(notesContainer: source, noteUUIDs: noteUUID.map { [$0] } ?? [])
-            output(AppleCloudNotesParserFormatter().format(result))
+            let documents = result.notes.map { NoteDocumentBuilder().document(parsedNote: $0) }
+            let debugHTMLURLs: [URL]
+            if let debugHTMLDirectoryPath {
+                let debugHTMLDirectory = paths.expandPath(debugHTMLDirectoryPath).standardizedFileURL
+                debugHTMLURLs = try NoteDocumentDebugHTMLWriter().write(documents, to: debugHTMLDirectory)
+            } else {
+                debugHTMLURLs = []
+            }
+            output(AppleCloudNotesParserFormatter().format(result, documents: documents, debugHTMLURLs: debugHTMLURLs))
         }
     }
 
@@ -164,7 +172,7 @@ public extension AppRunner {
       notes2myicor reset-state --note-uuid <uuid> [--state-db <path>]
       notes2myicor scan --account <name> --folder <path> [--recursive] [--database <path>] [--notes-container <path>] [--state-db <path>]
       notes2myicor snapshot [--notes-container <path>] [--work-dir <path>]
-      notes2myicor parse [--note-uuid <uuid>] [--notes-container <path>] [--parser-script <path>] [--ruby <path>] [--output-dir <path>]
+      notes2myicor parse [--note-uuid <uuid>] [--notes-container <path>] [--parser-script <path>] [--ruby <path>] [--output-dir <path>] [--debug-html-dir <path>]
 
     Commands:
       accounts         List Apple Notes accounts.
@@ -184,6 +192,7 @@ public extension AppRunner {
       --account           Apple Notes account name.
       --config            Config file path. Defaults to ~/Library/Application Support/Notes2MyICOR/config.json.
       --database          SQLite database path for schema inspection.
+      --debug-html-dir    Directory for rendered debug HTML output.
       --folder            Apple Notes folder path.
       --notes-container   Apple Notes group container path. Defaults to ~/Library/Group Containers/group.com.apple.notes.
       --note-uuid         Apple Notes note UUID.
@@ -211,7 +220,7 @@ public enum CLICommand: Equatable, Sendable {
     case resetState(noteUUID: String, stateDatabasePath: String?)
     case scan(accountName: String, folderPath: String, recursive: Bool, databasePath: String?, notesContainerPath: String?, stateDatabasePath: String?)
     case snapshot(notesContainerPath: String?, workDirectoryPath: String?)
-    case parse(noteUUID: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, outputDirectoryPath: String?)
+    case parse(noteUUID: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, outputDirectoryPath: String?, debugHTMLDirectoryPath: String?)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -292,7 +301,8 @@ public enum CLICommand: Equatable, Sendable {
                 notesContainerPath: options.notesContainerPath,
                 parserScriptPath: options.parserScriptPath,
                 rubyPath: options.rubyPath,
-                outputDirectoryPath: options.outputDirectoryPath
+                outputDirectoryPath: options.outputDirectoryPath,
+                debugHTMLDirectoryPath: options.debugHTMLDirectoryPath
             )
         default:
             throw CLIError.usage("Unknown command: \(first)")
@@ -444,6 +454,8 @@ public enum CLICommand: Equatable, Sendable {
                 options.rubyPath = try requireValue(iterator.next(), for: argument)
             case "--output-dir":
                 options.outputDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--debug-html-dir":
+                options.debugHTMLDirectoryPath = try requireValue(iterator.next(), for: argument)
             case "--help", "-h":
                 throw CLIError.usage(AppRunner.helpText)
             default:
@@ -493,6 +505,7 @@ private struct ParserOptions {
     var parserScriptPath: String?
     var rubyPath: String?
     var outputDirectoryPath: String?
+    var debugHTMLDirectoryPath: String?
 }
 
 private enum InventoryOption: Hashable {

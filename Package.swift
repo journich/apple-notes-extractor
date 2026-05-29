@@ -5,6 +5,9 @@ import PackageDescription
 
 let package = Package(
     name: "notes2myicor",
+    platforms: [
+        .macOS(.v10_15),
+    ],
     products: [
         .executable(name: "notes2myicor", targets: ["notes2myicor"]),
         .library(name: "Notes2MyICORCore", targets: ["Notes2MyICORCore"]),

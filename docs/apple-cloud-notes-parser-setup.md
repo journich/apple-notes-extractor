@@ -64,3 +64,11 @@ Once this works, Stage 7 can continue by configuring `notes2myicor` to call:
 ```text
 ../apple_cloud_notes_parser/notes_cloud_ripper.rb
 ```
+
+Stage 8 can generate renderable debug HTML from parser output:
+
+```bash
+swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --debug-html-dir /tmp/notes2myicor-debug-html
+```
+
+Debug HTML is generated output and may contain note contents. Keep it outside the repository and delete it after local verification.
