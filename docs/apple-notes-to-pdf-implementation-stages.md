@@ -613,19 +613,20 @@ Handle notes that disappear, move out of scope, or appear in Recently Deleted wi
 - Mark hard deletion only after grace threshold.
 - Detect out-of-scope notes that still exist elsewhere.
 - Detect Recently Deleted when possible.
-- Add `_OutOfScope` handling.
-- Add `_Deleted/Recently Deleted` handling.
-- Add `_Deleted/Permanently Missing` handling.
+- Add `_OutOfScope` handling if move/archive policy is explicitly enabled later.
+- Add `_Deleted/Recently Deleted` handling if move/archive policy is explicitly enabled later.
+- Add `_Deleted/Permanently Missing` handling if move/archive policy is explicitly enabled later.
 - Make move-vs-mark behavior configurable.
+  - Current default for this project is mark-only: update state, preserve exported files in place.
 
 ### Unit tests
 
 - One missing scan does not mark deleted.
 - Missing below threshold preserves active PDF.
 - Missing at threshold marks deleted.
-- Deleted note PDF is moved, not removed.
+- Deleted note PDF is preserved by the default mark-only policy.
 - Out-of-scope note is not marked deleted.
-- Out-of-scope PDF handling follows config.
+- Out-of-scope PDF handling preserves files by default.
 - Recently Deleted note is marked soft-deleted when detectable.
 - Deletion policy is idempotent.
 
@@ -938,4 +939,3 @@ For stages that touch real Apple Notes data, the stage is not complete until the
 
 - controlled fixture data, and
 - the real local Apple Notes database, where permissions allow.
-

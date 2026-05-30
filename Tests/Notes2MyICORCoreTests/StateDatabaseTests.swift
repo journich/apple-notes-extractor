@@ -64,6 +64,30 @@ final class StateDatabaseTests: XCTestCase {
         XCTAssertNil(try database.noteState(noteUUID: "note-1"))
     }
 
+    func testNoteStatePersistsDeletionPolicyTimestamps() throws {
+        let directory = try TemporaryDirectory()
+        let database = try migratedDatabase(in: directory)
+
+        try database.upsertNoteState(NoteState(
+            noteUUID: "note-1",
+            exportStatus: "deleted",
+            pdfPath: "/tmp/example.pdf",
+            missingScanCount: 3,
+            isDeleted: true,
+            isInScope: false,
+            lastSeenAt: "2026-05-30T00:00:00Z",
+            deletedDetectedAt: "2026-05-30T00:00:00Z",
+            firstMissingAt: "2026-05-29T00:00:00Z"
+        ))
+
+        let state = try XCTUnwrap(database.noteState(noteUUID: "note-1"))
+        XCTAssertEqual(state.pdfPath, "/tmp/example.pdf")
+        XCTAssertTrue(state.isDeleted)
+        XCTAssertFalse(state.isInScope)
+        XCTAssertEqual(state.deletedDetectedAt, "2026-05-30T00:00:00Z")
+        XCTAssertEqual(state.firstMissingAt, "2026-05-29T00:00:00Z")
+    }
+
     func testScanRunInsertUpdateWorks() throws {
         let directory = try TemporaryDirectory()
         let database = try migratedDatabase(in: directory)

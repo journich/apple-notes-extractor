@@ -104,6 +104,7 @@ public struct SyncEngine {
             allCurrentNotes: inventory.notes,
             previousStates: previousStates,
             allowedFolderIDs: scope.allowedFolderIDs,
+            folders: inventory.folders,
             missingGraceCount: request.missingGraceCount
         )
 
@@ -147,7 +148,7 @@ public struct SyncEngine {
             switch change.kind {
             case .unchanged:
                 try preserveState(change: change, timestamp: startedAt)
-            case .outOfScope, .missingPossiblyDeleted, .deletedAfterGrace:
+            case .outOfScope, .recentlyDeleted, .missingPossiblyDeleted, .deletedAfterGrace:
                 try updateNonExportState(change: change, timestamp: startedAt)
             case .new, .modified, .metadataChanged, .exportFailed:
                 guard let note = change.note else {
@@ -230,7 +231,9 @@ public struct SyncEngine {
             missingScanCount: 0,
             isDeleted: false,
             isInScope: true,
-            lastSeenAt: timestamp
+            lastSeenAt: timestamp,
+            deletedDetectedAt: change.previousState?.deletedDetectedAt,
+            firstMissingAt: change.previousState?.firstMissingAt
         ))
     }
 
@@ -246,7 +249,9 @@ public struct SyncEngine {
             missingScanCount: 0,
             isDeleted: false,
             isInScope: true,
-            lastSeenAt: timestamp
+            lastSeenAt: timestamp,
+            deletedDetectedAt: change.previousState?.deletedDetectedAt,
+            firstMissingAt: change.previousState?.firstMissingAt
         ))
     }
 
@@ -265,7 +270,9 @@ public struct SyncEngine {
             missingScanCount: 0,
             isDeleted: false,
             isInScope: true,
-            lastSeenAt: timestamp
+            lastSeenAt: timestamp,
+            deletedDetectedAt: previous.deletedDetectedAt,
+            firstMissingAt: previous.firstMissingAt
         ))
     }
 
@@ -276,7 +283,7 @@ public struct SyncEngine {
         try stateDatabase.upsertNoteState(NoteState(
             noteUUID: previous.noteUUID,
             title: previous.title,
-            exportStatus: previous.exportStatus,
+            exportStatus: exportStatus(for: change, previous: previous),
             pdfPath: previous.pdfPath,
             contentHash: previous.contentHash,
             modifiedCoreData: previous.modifiedCoreData,
@@ -284,10 +291,43 @@ public struct SyncEngine {
             missingScanCount: change.kind == .missingPossiblyDeleted || change.kind == .deletedAfterGrace
                 ? previous.missingScanCount + 1
                 : 0,
-            isDeleted: change.kind == .deletedAfterGrace,
-            isInScope: change.kind != .outOfScope,
-            lastSeenAt: timestamp
+            isDeleted: change.kind == .deletedAfterGrace || change.kind == .recentlyDeleted,
+            isInScope: change.kind != .outOfScope && change.kind != .recentlyDeleted,
+            lastSeenAt: timestamp,
+            deletedDetectedAt: deletedDetectedAt(for: change, previous: previous, timestamp: timestamp),
+            firstMissingAt: firstMissingAt(for: change, previous: previous, timestamp: timestamp)
         ))
+    }
+
+    private func exportStatus(for change: NoteChange, previous: NoteState) -> String {
+        switch change.kind {
+        case .outOfScope:
+            "out_of_scope"
+        case .recentlyDeleted:
+            "soft_deleted"
+        case .deletedAfterGrace:
+            "deleted"
+        default:
+            previous.exportStatus
+        }
+    }
+
+    private func deletedDetectedAt(for change: NoteChange, previous: NoteState, timestamp: String) -> String? {
+        switch change.kind {
+        case .recentlyDeleted, .deletedAfterGrace:
+            previous.deletedDetectedAt ?? timestamp
+        default:
+            previous.deletedDetectedAt
+        }
+    }
+
+    private func firstMissingAt(for change: NoteChange, previous: NoteState, timestamp: String) -> String? {
+        switch change.kind {
+        case .missingPossiblyDeleted, .deletedAfterGrace:
+            previous.firstMissingAt ?? timestamp
+        default:
+            previous.firstMissingAt
+        }
     }
 
     private func timestamp() -> String {
@@ -306,6 +346,10 @@ public struct SyncSummaryFormatter {
         MODIFIED: \(summary.changeSummary.count(.modified))
         METADATA_CHANGED: \(summary.changeSummary.count(.metadataChanged))
         UNCHANGED: \(summary.changeSummary.count(.unchanged))
+        OUT_OF_SCOPE: \(summary.changeSummary.count(.outOfScope))
+        RECENTLY_DELETED: \(summary.changeSummary.count(.recentlyDeleted))
+        MISSING_POSSIBLY_DELETED: \(summary.changeSummary.count(.missingPossiblyDeleted))
+        DELETED_AFTER_GRACE: \(summary.changeSummary.count(.deletedAfterGrace))
         EXPORTED: \(summary.exported)
         SKIPPED_CONTENT_UNCHANGED: \(summary.skippedContentUnchanged)
         FAILED: \(summary.failed)

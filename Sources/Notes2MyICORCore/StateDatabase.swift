@@ -13,6 +13,8 @@ public struct NoteState: Equatable, Sendable {
     public var isDeleted: Bool
     public var isInScope: Bool
     public var lastSeenAt: String
+    public var deletedDetectedAt: String?
+    public var firstMissingAt: String?
 
     public init(
         noteUUID: String,
@@ -25,7 +27,9 @@ public struct NoteState: Equatable, Sendable {
         missingScanCount: Int = 0,
         isDeleted: Bool = false,
         isInScope: Bool = true,
-        lastSeenAt: String
+        lastSeenAt: String,
+        deletedDetectedAt: String? = nil,
+        firstMissingAt: String? = nil
     ) {
         self.noteUUID = noteUUID
         self.title = title
@@ -38,6 +42,8 @@ public struct NoteState: Equatable, Sendable {
         self.isDeleted = isDeleted
         self.isInScope = isInScope
         self.lastSeenAt = lastSeenAt
+        self.deletedDetectedAt = deletedDetectedAt
+        self.firstMissingAt = firstMissingAt
     }
 
     init(row: SQLiteRow) {
@@ -52,7 +58,9 @@ public struct NoteState: Equatable, Sendable {
             missingScanCount: row.int("missing_scan_count"),
             isDeleted: row.int("is_deleted") != 0,
             isInScope: row.int("is_in_scope") != 0,
-            lastSeenAt: row.string("last_seen_at")
+            lastSeenAt: row.string("last_seen_at"),
+            deletedDetectedAt: row.optionalString("deleted_detected_at"),
+            firstMissingAt: row.optionalString("first_missing_at")
         )
     }
 }
@@ -265,9 +273,11 @@ public final class StateDatabase {
                 missing_scan_count,
                 is_deleted,
                 is_in_scope,
-                last_seen_at
+                last_seen_at,
+                deleted_detected_at,
+                first_missing_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(note_uuid) DO UPDATE SET
                 title = excluded.title,
                 export_status = excluded.export_status,
@@ -278,7 +288,9 @@ public final class StateDatabase {
                 missing_scan_count = excluded.missing_scan_count,
                 is_deleted = excluded.is_deleted,
                 is_in_scope = excluded.is_in_scope,
-                last_seen_at = excluded.last_seen_at;
+                last_seen_at = excluded.last_seen_at,
+                deleted_detected_at = excluded.deleted_detected_at,
+                first_missing_at = excluded.first_missing_at;
             """,
             bindings: [
                 .text(state.noteUUID),
@@ -292,6 +304,8 @@ public final class StateDatabase {
                 .int(state.isDeleted ? 1 : 0),
                 .int(state.isInScope ? 1 : 0),
                 .text(state.lastSeenAt),
+                .optionalText(state.deletedDetectedAt),
+                .optionalText(state.firstMissingAt),
             ]
         )
     }
@@ -310,7 +324,9 @@ public final class StateDatabase {
                 missing_scan_count,
                 is_deleted,
                 is_in_scope,
-                last_seen_at
+                last_seen_at,
+                deleted_detected_at,
+                first_missing_at
             FROM notes_state
             WHERE note_uuid = ?;
             """,
@@ -340,7 +356,9 @@ public final class StateDatabase {
                 missing_scan_count,
                 is_deleted,
                 is_in_scope,
-                last_seen_at
+                last_seen_at,
+                deleted_detected_at,
+                first_missing_at
             FROM notes_state
             ORDER BY note_uuid;
             """

@@ -63,6 +63,22 @@ final class ChangeClassifierTests: XCTestCase {
         XCTAssertEqual(summary.count(.outOfScope), 1)
     }
 
+    func testRecentlyDeletedFolderBecomesRecentlyDeleted() {
+        let summary = ChangeClassifier().classify(
+            inScopeNotes: [],
+            allCurrentNotes: [note(uuid: "n1", folderID: 99)],
+            previousStates: [state(uuid: "n1")],
+            allowedFolderIDs: [1],
+            folders: [
+                AppleNotesFolder(objectID: 99, uuid: "recently-deleted", name: "Recently Deleted", accountObjectID: 1, parentObjectID: nil),
+            ],
+            missingGraceCount: 3
+        )
+
+        XCTAssertEqual(summary.count(.recentlyDeleted), 1)
+        XCTAssertEqual(summary.count(.outOfScope), 0)
+    }
+
     func testMissingBelowGraceBecomesPossiblyDeleted() {
         let summary = ChangeClassifier().classify(
             inScopeNotes: [],

@@ -158,3 +158,11 @@ swift run notes2myicor sync --once --dry-run --account "iCloud" --folder "Captur
 ```
 
 `sync --once` reads the Notes inventory, classifies changes, parses changed notes, writes PDFs and sidecar JSON, and updates the app-owned state database only after successful export. `--dry-run` reports planned work without parsing, exporting, or updating note state. Current sync state stores Apple Notes folder object IDs for change comparison; sidecar JSON and exported documents still use human folder paths.
+
+Stage 11 adds conservative deletion and out-of-scope handling. The default policy is mark-only:
+
+- notes missing below the grace threshold keep their PDF path and are not marked deleted;
+- notes missing at the grace threshold are marked deleted in state, but their PDFs are not moved or removed;
+- notes moved outside the selected folder are marked out of scope, not deleted;
+- notes detected in a `Recently Deleted` folder are marked soft-deleted in state;
+- exported PDFs and sidecar JSON are preserved in place.

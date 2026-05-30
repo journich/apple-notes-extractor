@@ -6,6 +6,7 @@ public enum NoteChangeKind: String, Equatable, Sendable {
     case metadataChanged = "METADATA_CHANGED"
     case unchanged = "UNCHANGED"
     case outOfScope = "OUT_OF_SCOPE"
+    case recentlyDeleted = "RECENTLY_DELETED"
     case missingPossiblyDeleted = "MISSING_POSSIBLY_DELETED"
     case deletedAfterGrace = "DELETED_AFTER_GRACE"
     case exportFailed = "EXPORT_FAILED"
@@ -45,11 +46,13 @@ public struct ChangeClassifier {
         allCurrentNotes: [AppleNotesNoteMetadata],
         previousStates: [NoteState],
         allowedFolderIDs: Set<Int>,
+        folders: [AppleNotesFolder] = [],
         missingGraceCount: Int
     ) -> ChangeSummary {
         let previousByUUID = Dictionary(uniqueKeysWithValues: previousStates.map { ($0.noteUUID, $0) })
         let inScopeByUUID = Dictionary(uniqueKeysWithValues: inScopeNotes.map { ($0.uuid, $0) })
         let allCurrentByUUID = Dictionary(uniqueKeysWithValues: allCurrentNotes.map { ($0.uuid, $0) })
+        let folderPaths = FolderPathBuilder(folders: folders).pathsByFolderID()
 
         var changes: [NoteChange] = []
 
@@ -73,7 +76,10 @@ public struct ChangeClassifier {
         for previous in previousStates where inScopeByUUID[previous.noteUUID] == nil {
             if let current = allCurrentByUUID[previous.noteUUID] {
                 if let folderID = current.folderObjectID, allowedFolderIDs.contains(folderID) == false {
-                    changes.append(NoteChange(noteUUID: previous.noteUUID, kind: .outOfScope, note: current, previousState: previous))
+                    let kind: NoteChangeKind = isRecentlyDeleted(folderID: folderID, folderPaths: folderPaths)
+                        ? .recentlyDeleted
+                        : .outOfScope
+                    changes.append(NoteChange(noteUUID: previous.noteUUID, kind: kind, note: current, previousState: previous))
                 }
             } else {
                 let missingCount = previous.missingScanCount + 1
@@ -83,6 +89,15 @@ public struct ChangeClassifier {
         }
 
         return ChangeSummary(changes: changes.sorted { $0.noteUUID < $1.noteUUID })
+    }
+
+    private func isRecentlyDeleted(folderID: Int, folderPaths: [Int: String]) -> Bool {
+        guard let folderPath = folderPaths[folderID] else {
+            return false
+        }
+        return folderPath
+            .split(separator: "/")
+            .contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Recently Deleted") == .orderedSame }
     }
 }
 
@@ -97,6 +112,7 @@ public struct ScanSummaryFormatter {
         METADATA_CHANGED: \(summary.count(.metadataChanged))
         UNCHANGED: \(summary.count(.unchanged))
         OUT_OF_SCOPE: \(summary.count(.outOfScope))
+        RECENTLY_DELETED: \(summary.count(.recentlyDeleted))
         MISSING_POSSIBLY_DELETED: \(summary.count(.missingPossiblyDeleted))
         DELETED_AFTER_GRACE: \(summary.count(.deletedAfterGrace))
         EXPORT_FAILED: \(summary.count(.exportFailed))

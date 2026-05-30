@@ -140,7 +140,101 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertNil(try harness.database.noteState(noteUUID: "note-1"))
     }
 
-    private static func note(uuid: String, modifiedCoreData: Double = 10) -> AppleNotesNoteMetadata {
+    func testMissingBelowThresholdPreservesActivePDF() throws {
+        let harness = try SyncHarness(notes: [])
+        try harness.database.migrate()
+        try harness.database.upsertNoteState(Self.exportedState(missingScanCount: 0))
+
+        let summary = try harness.engine.syncOnce(harness.request())
+
+        XCTAssertEqual(summary.changeSummary.count(.missingPossiblyDeleted), 1)
+        let state = try XCTUnwrap(harness.database.noteState(noteUUID: "note-1"))
+        XCTAssertEqual(state.pdfPath, "/tmp/existing.pdf")
+        XCTAssertEqual(state.missingScanCount, 1)
+        XCTAssertFalse(state.isDeleted)
+        XCTAssertEqual(state.firstMissingAt, "1970-01-01T00:01:40Z")
+        XCTAssertNil(state.deletedDetectedAt)
+    }
+
+    func testMissingAtThresholdMarksDeletedAndPreservesPDF() throws {
+        let harness = try SyncHarness(notes: [])
+        try harness.database.migrate()
+        try harness.database.upsertNoteState(Self.exportedState(missingScanCount: 2))
+
+        let summary = try harness.engine.syncOnce(harness.request())
+
+        XCTAssertEqual(summary.changeSummary.count(.deletedAfterGrace), 1)
+        let state = try XCTUnwrap(harness.database.noteState(noteUUID: "note-1"))
+        XCTAssertEqual(state.pdfPath, "/tmp/existing.pdf")
+        XCTAssertEqual(state.exportStatus, "deleted")
+        XCTAssertEqual(state.missingScanCount, 3)
+        XCTAssertTrue(state.isDeleted)
+        XCTAssertEqual(state.deletedDetectedAt, "1970-01-01T00:01:40Z")
+    }
+
+    func testOutOfScopeNoteIsNotMarkedDeletedAndPreservesPDF() throws {
+        let harness = try SyncHarness(
+            notes: [Self.note(uuid: "note-1", folderID: 20)],
+            folders: SyncHarness.defaultFolders + [
+                AppleNotesFolder(objectID: 20, uuid: "archive", name: "Archive", accountObjectID: 1, parentObjectID: nil),
+            ]
+        )
+        try harness.database.migrate()
+        try harness.database.upsertNoteState(Self.exportedState())
+
+        let summary = try harness.engine.syncOnce(harness.request())
+
+        XCTAssertEqual(summary.changeSummary.count(.outOfScope), 1)
+        let state = try XCTUnwrap(harness.database.noteState(noteUUID: "note-1"))
+        XCTAssertEqual(state.pdfPath, "/tmp/existing.pdf")
+        XCTAssertEqual(state.exportStatus, "out_of_scope")
+        XCTAssertFalse(state.isDeleted)
+        XCTAssertFalse(state.isInScope)
+    }
+
+    func testRecentlyDeletedNoteIsSoftDeletedAndPreservesPDF() throws {
+        let harness = try SyncHarness(
+            notes: [Self.note(uuid: "note-1", folderID: 99)],
+            folders: SyncHarness.defaultFolders + [
+                AppleNotesFolder(objectID: 99, uuid: "recently-deleted", name: "Recently Deleted", accountObjectID: 1, parentObjectID: nil),
+            ]
+        )
+        try harness.database.migrate()
+        try harness.database.upsertNoteState(Self.exportedState())
+
+        let summary = try harness.engine.syncOnce(harness.request())
+
+        XCTAssertEqual(summary.changeSummary.count(.recentlyDeleted), 1)
+        let state = try XCTUnwrap(harness.database.noteState(noteUUID: "note-1"))
+        XCTAssertEqual(state.pdfPath, "/tmp/existing.pdf")
+        XCTAssertEqual(state.exportStatus, "soft_deleted")
+        XCTAssertTrue(state.isDeleted)
+        XCTAssertFalse(state.isInScope)
+        XCTAssertEqual(state.deletedDetectedAt, "1970-01-01T00:01:40Z")
+    }
+
+    func testDeletionPolicyIsIdempotent() throws {
+        let harness = try SyncHarness(notes: [])
+        try harness.database.migrate()
+        try harness.database.upsertNoteState(Self.exportedState(
+            exportStatus: "deleted",
+            missingScanCount: 3,
+            isDeleted: true,
+            deletedDetectedAt: "first-delete",
+            firstMissingAt: "first-missing"
+        ))
+
+        _ = try harness.engine.syncOnce(harness.request())
+        _ = try harness.engine.syncOnce(harness.request())
+
+        let state = try XCTUnwrap(harness.database.noteState(noteUUID: "note-1"))
+        XCTAssertEqual(state.pdfPath, "/tmp/existing.pdf")
+        XCTAssertEqual(state.deletedDetectedAt, "first-delete")
+        XCTAssertEqual(state.firstMissingAt, "first-missing")
+        XCTAssertTrue(state.isDeleted)
+    }
+
+    private static func note(uuid: String, modifiedCoreData: Double = 10, folderID: Int = 10) -> AppleNotesNoteMetadata {
         AppleNotesNoteMetadata(
             objectID: uuid == "note-1" ? 101 : 102,
             uuid: uuid,
@@ -151,8 +245,31 @@ final class SyncEngineTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 1),
             modifiedAt: Date(timeIntervalSince1970: modifiedCoreData),
             accountObjectID: 1,
-            folderObjectID: 10,
+            folderObjectID: folderID,
             noteDataObjectID: nil
+        )
+    }
+
+    private static func exportedState(
+        exportStatus: String = "exported",
+        missingScanCount: Int = 0,
+        isDeleted: Bool = false,
+        deletedDetectedAt: String? = nil,
+        firstMissingAt: String? = nil
+    ) -> NoteState {
+        NoteState(
+            noteUUID: "note-1",
+            title: "Fixture",
+            exportStatus: exportStatus,
+            pdfPath: "/tmp/existing.pdf",
+            contentHash: "sha256:existing",
+            modifiedCoreData: 10,
+            folderPath: "10",
+            missingScanCount: missingScanCount,
+            isDeleted: isDeleted,
+            lastSeenAt: "old",
+            deletedDetectedAt: deletedDetectedAt,
+            firstMissingAt: firstMissingAt
         )
     }
 
@@ -178,13 +295,14 @@ private final class SyncHarness {
         notes: [AppleNotesNoteMetadata],
         parsedNotes: [AppleCloudNotesParsedNote]? = nil,
         parserThrows: Bool = false,
-        exporterFailures: Set<String> = []
+        exporterFailures: Set<String> = [],
+        folders: [AppleNotesFolder] = SyncHarness.defaultFolders
     ) throws {
         directory = try TemporaryDirectory()
         database = try StateDatabase.open(at: directory.url.appendingPathComponent("state.sqlite"))
         let inventory = AppleNotesInventory(
             accounts: [AppleNotesAccount(objectID: 1, uuid: "account-uuid", name: "iCloud")],
-            folders: [AppleNotesFolder(objectID: 10, uuid: "folder-uuid", name: "Capture", accountObjectID: 1, parentObjectID: nil)],
+            folders: folders,
             notes: notes
         )
         let inventoryReader = FakeSyncInventoryReader(inventory: inventory)
@@ -214,6 +332,10 @@ private final class SyncHarness {
             dryRun: dryRun
         )
     }
+
+    static let defaultFolders = [
+        AppleNotesFolder(objectID: 10, uuid: "folder-uuid", name: "Capture", accountObjectID: 1, parentObjectID: nil),
+    ]
 }
 
 private struct FakeSyncInventoryReader: AppleNotesInventoryReading {

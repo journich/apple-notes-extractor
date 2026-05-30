@@ -33,6 +33,7 @@ public struct ScanEngine {
             allCurrentNotes: inventory.notes,
             previousStates: previousStates,
             allowedFolderIDs: scope.allowedFolderIDs,
+            folders: inventory.folders,
             missingGraceCount: missingGraceCount
         )
 
@@ -70,24 +71,28 @@ public struct ScanEngine {
                 missingScanCount: 0,
                 isDeleted: false,
                 isInScope: true,
-                lastSeenAt: timestamp
+                lastSeenAt: timestamp,
+                deletedDetectedAt: change.previousState?.deletedDetectedAt,
+                firstMissingAt: change.previousState?.firstMissingAt
             ))
-        case .outOfScope:
+        case .outOfScope, .recentlyDeleted:
             guard let previous = change.previousState else {
                 return
             }
             try stateDatabase.upsertNoteState(NoteState(
                 noteUUID: previous.noteUUID,
                 title: previous.title,
-                exportStatus: previous.exportStatus,
+                exportStatus: change.kind == .recentlyDeleted ? "soft_deleted" : "out_of_scope",
                 pdfPath: previous.pdfPath,
                 contentHash: previous.contentHash,
                 modifiedCoreData: previous.modifiedCoreData,
                 folderPath: previous.folderPath,
                 missingScanCount: 0,
-                isDeleted: false,
+                isDeleted: change.kind == .recentlyDeleted,
                 isInScope: false,
-                lastSeenAt: timestamp
+                lastSeenAt: timestamp,
+                deletedDetectedAt: change.kind == .recentlyDeleted ? previous.deletedDetectedAt ?? timestamp : previous.deletedDetectedAt,
+                firstMissingAt: previous.firstMissingAt
             ))
         case .missingPossiblyDeleted, .deletedAfterGrace:
             guard let previous = change.previousState else {
@@ -104,7 +109,9 @@ public struct ScanEngine {
                 missingScanCount: previous.missingScanCount + 1,
                 isDeleted: change.kind == .deletedAfterGrace,
                 isInScope: previous.isInScope,
-                lastSeenAt: previous.lastSeenAt
+                lastSeenAt: previous.lastSeenAt,
+                deletedDetectedAt: change.kind == .deletedAfterGrace ? previous.deletedDetectedAt ?? timestamp : previous.deletedDetectedAt,
+                firstMissingAt: previous.firstMissingAt ?? timestamp
             ))
         }
     }

@@ -89,3 +89,5 @@ swift run notes2myicor sync --once --dry-run --account "iCloud" --folder "Captur
 ```
 
 Use a temporary output directory while testing. Real sync output includes PDFs and sidecar JSON derived from note contents and must remain untracked.
+
+Stage 11 uses a mark-only lifecycle policy by default. When a note moves out of scope, appears in Recently Deleted, or goes missing past the configured grace count, the app updates local state but preserves existing PDFs and sidecar JSON in place.
