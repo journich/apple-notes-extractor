@@ -67,7 +67,7 @@ final class AppleCloudNotesParserTests: XCTestCase {
         let html = output.appendingPathComponent("html/note-uuid.html")
         try FileManager.default.createDirectory(at: json.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: html.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("<html></html>".utf8).write(to: html)
+        try Data("<p>Individual HTML</p>".utf8).write(to: html)
         try Data(
             """
             {
@@ -86,6 +86,43 @@ final class AppleCloudNotesParserTests: XCTestCase {
         )
 
         XCTAssertEqual(notes.count, 1)
+        XCTAssertEqual(
+            notes[0].individualHTMLPath.map { URL(fileURLWithPath: $0).standardizedFileURL.path },
+            html.standardizedFileURL.path
+        )
+        XCTAssertEqual(notes[0].html, "<p>Individual HTML</p>")
+    }
+
+    func testJSONDecoderFindsParserHTMLPathWhenFilenameIncludesTitle() throws {
+        let directory = try TemporaryDirectory()
+        let output = directory.url.appendingPathComponent("notes_rip", isDirectory: true)
+        let json = output.appendingPathComponent("json/all_notes_1.json")
+        let html = output
+            .appendingPathComponent("html/note_store1/iCloud-Inbox", isDirectory: true)
+            .appendingPathComponent("C3517DF0-F82C-4874-A400-633114484564 - Random Notes..html")
+        try FileManager.default.createDirectory(at: json.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: html.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("<html></html>".utf8).write(to: html)
+        try Data(
+            """
+            {
+              "notes": {
+                "1": {
+                  "uuid": "C3517DF0-F82C-4874-A400-633114484564",
+                  "title": "Wanted",
+                  "html": "<p><img src='../../../files/example.png'></p>"
+                }
+              }
+            }
+            """.utf8
+        ).write(to: json)
+
+        let notes = try AppleCloudNotesJSONDecoder().decodeNotes(
+            jsonPath: json,
+            outputDirectory: output,
+            noteUUIDs: ["C3517DF0-F82C-4874-A400-633114484564"]
+        )
+
         XCTAssertEqual(
             notes[0].individualHTMLPath.map { URL(fileURLWithPath: $0).standardizedFileURL.path },
             html.standardizedFileURL.path

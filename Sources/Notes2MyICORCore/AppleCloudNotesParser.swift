@@ -219,12 +219,17 @@ public struct AppleCloudNotesJSONDecoder {
                 return nil
             }
 
+            let individualHTMLPath = htmlPathsByUUID[uuid]
+            let html = individualHTMLPath.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+                ?? note["html"] as? String
+                ?? ""
+
             return AppleCloudNotesParsedNote(
                 uuid: uuid,
                 title: note["title"] as? String ?? "",
-                html: note["html"] as? String ?? "",
+                html: html,
                 jsonID: jsonID,
-                individualHTMLPath: htmlPathsByUUID[uuid]?.path
+                individualHTMLPath: individualHTMLPath?.path
             )
         }
 
@@ -243,10 +248,21 @@ public struct AppleCloudNotesJSONDecoder {
 
         var result: [String: URL] = [:]
         for case let fileURL as URL in enumerator where fileURL.pathExtension == "html" {
-            let uuid = fileURL.deletingPathExtension().lastPathComponent
+            let filename = fileURL.deletingPathExtension().lastPathComponent
+            let uuid = uuidPrefix(in: filename) ?? filename
             result[uuid] = fileURL
         }
         return result
+    }
+
+    private func uuidPrefix(in filename: String) -> String? {
+        let pattern = #"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: filename, range: NSRange(filename.startIndex..<filename.endIndex, in: filename)),
+              let range = Range(match.range, in: filename) else {
+            return nil
+        }
+        return String(filename[range]).uppercased()
     }
 }
 

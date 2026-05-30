@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import PDFKit
 import XCTest
 @testable import Notes2MyICORCore
 
@@ -113,6 +115,33 @@ final class PDFExportTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: exportedPath), "embedded pdf fixture")
     }
 
+    func testImageAssetsAppendAsPDFPages() throws {
+        let directory = try TemporaryDirectory()
+        let imageURL = directory.url.appendingPathComponent("drawing.png")
+        try makeImageData().write(to: imageURL)
+        let document = fixtureDocument(assets: [
+            NoteDocumentAsset(
+                reference: "drawing.png",
+                resolvedPath: imageURL.path,
+                hashKey: "drawing.png",
+                kind: .sketchOrHandwriting,
+                exists: true
+            ),
+        ])
+
+        let result = try EmbeddedPDFExportProcessor().process(
+            pdfData: try makePDFData(),
+            document: document,
+            outputDirectory: directory.url,
+            baseFilename: "note-uuid - Fixture",
+            mode: .append
+        )
+
+        let pdf = try XCTUnwrap(PDFDocument(data: result.pdfData))
+        XCTAssertEqual(pdf.pageCount, 2)
+        XCTAssertEqual(result.warnings, [])
+    }
+
     func testExistingPDFReplacementIsAtomicWherePractical() throws {
         let directory = try TemporaryDirectory()
         let writer = NoteExportWriter()
@@ -158,6 +187,7 @@ final class PDFExportTests: XCTestCase {
     private func fixtureDocument(
         title: String = "Fixture",
         folderPath: String? = "Capture",
+        assets: [NoteDocumentAsset] = [],
         embeddedObjects: [NoteDocumentEmbeddedObject] = []
     ) -> NoteDocument {
         NoteDocument(
@@ -169,10 +199,35 @@ final class PDFExportTests: XCTestCase {
             modifiedAt: Date(timeIntervalSince1970: 2),
             htmlPath: nil,
             htmlContent: "<p>Body</p>",
-            assets: [],
+            assets: assets,
             embeddedObjects: embeddedObjects,
             warnings: ["fixture warning"]
         )
+    }
+
+    private func makePDFData() throws -> Data {
+        let document = PDFDocument()
+        let page = try XCTUnwrap(PDFPage(image: makeImage()))
+        document.insert(page, at: 0)
+        return try XCTUnwrap(document.dataRepresentation())
+    }
+
+    private func makeImageData() throws -> Data {
+        let image = makeImage()
+        let tiff = try XCTUnwrap(image.tiffRepresentation)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    }
+
+    private func makeImage() -> NSImage {
+        let image = NSImage(size: NSSize(width: 24, height: 12))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: 24, height: 12).fill()
+        NSColor.black.setFill()
+        NSRect(x: 2, y: 2, width: 20, height: 8).fill()
+        image.unlockFocus()
+        return image
     }
 }
 

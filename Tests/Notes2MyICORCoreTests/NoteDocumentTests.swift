@@ -79,6 +79,17 @@ final class NoteDocumentTests: XCTestCase {
         XCTAssertEqual(embeddedObjects.first?.status, .renderedInline)
     }
 
+    func testHTMLReferenceIsNotClassifiedAsHandwritingFromDirectoryName() throws {
+        let classifier = NoteDocumentEmbeddedObjectClassifier()
+
+        let kind = classifier.kind(
+            reference: "../index.html",
+            resolvedPath: "/tmp/notes2myicor-handwriting-check/notes_rip/html/index.html"
+        )
+
+        XCTAssertEqual(kind, .html)
+    }
+
     func testMissingImageProducesWarning() throws {
         let directory = try TemporaryDirectory()
         let htmlURL = directory.url.appendingPathComponent("note.html")
@@ -169,6 +180,29 @@ final class NoteDocumentTests: XCTestCase {
         XCTAssertTrue(html.contains("<!doctype html>"))
         XCTAssertTrue(html.contains(#"<base href="file:///tmp/parser/">"#))
         XCTAssertTrue(html.contains("notes2myicor-metadata"))
+    }
+
+    func testHTMLRendererInlinesResolvedImageAssetsForPDFRendering() throws {
+        let directory = try TemporaryDirectory()
+        let imageURL = directory.url.appendingPathComponent("Preview.png")
+        try Data("image bytes".utf8).write(to: imageURL)
+        let document = fixtureDocument(
+            htmlContent: #"<p><img src="../../../files/Preview.png"></p>"#,
+            assets: [
+                NoteDocumentAsset(
+                    reference: "../../../files/Preview.png",
+                    resolvedPath: imageURL.path,
+                    hashKey: "../../../files/Preview.png",
+                    kind: .sketchOrHandwriting,
+                    exists: true
+                ),
+            ]
+        )
+
+        let html = NoteDocumentHTMLRenderer().render(document)
+
+        XCTAssertTrue(html.contains(#"src="data:image/png;base64,"#))
+        XCTAssertFalse(html.contains(#"src="../../../files/Preview.png""#))
     }
 
     func testBuilderAddsMetadataAndParserWarnings() throws {

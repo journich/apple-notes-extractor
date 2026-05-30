@@ -232,16 +232,19 @@ public struct NoteDocumentEmbeddedObjectClassifier {
         let candidate = "\(reference) \(resolvedPath ?? "")".lowercased()
         let ext = URL(fileURLWithPath: referenceWithoutQuery(reference)).pathExtension.lowercased()
 
-        if containsSketchHint(candidate) {
-            return .sketchOrHandwriting
-        }
-        if containsScanHint(candidate) {
-            return .scannedDocument
-        }
         if ["jpg", "jpeg", "png", "gif", "heic", "heif", "tif", "tiff", "webp", "svg"].contains(ext) {
+            if containsSketchHint(candidate) {
+                return .sketchOrHandwriting
+            }
+            if containsScanHint(candidate) {
+                return .scannedDocument
+            }
             return .image
         }
         if ext == "pdf" {
+            if containsScanHint(candidate) {
+                return .scannedDocument
+            }
             return .pdf
         }
         if ["aac", "aif", "aiff", "m4a", "mp3", "wav"].contains(ext) {
@@ -258,6 +261,12 @@ public struct NoteDocumentEmbeddedObjectClassifier {
         }
         if ["zip", "gz", "tgz", "tar"].contains(ext) {
             return .archive
+        }
+        if containsSketchHint(candidate) {
+            return .sketchOrHandwriting
+        }
+        if containsScanHint(candidate) {
+            return .scannedDocument
         }
         return .unknown
     }
@@ -386,6 +395,7 @@ public struct NoteDocumentHTMLRenderer {
         } ?? ""
 
         let metadata = includeMetadataHeader ? metadataHeader(for: document) : ""
+        let htmlContent = inlineRenderableImageAssets(in: document.htmlContent, assets: document.assets)
 
         return """
         <!doctype html>
@@ -398,7 +408,7 @@ public struct NoteDocumentHTMLRenderer {
         <body>
         \(metadata)
         <main class="notes2myicor-body">
-        \(document.htmlContent)
+        \(htmlContent)
         </main>
         </body>
         </html>
@@ -438,6 +448,66 @@ public struct NoteDocumentHTMLRenderer {
 
     private func escapeAttribute(_ value: String) -> String {
         escapeText(value)
+    }
+
+    private func inlineRenderableImageAssets(in html: String, assets: [NoteDocumentAsset]) -> String {
+        let imageAssetsByReference = Dictionary(uniqueKeysWithValues: assets.compactMap { asset -> (String, String)? in
+            guard [.image, .sketchOrHandwriting, .scannedDocument].contains(asset.kind),
+                  let resolvedPath = asset.resolvedPath,
+                  let mimeType = mimeType(for: resolvedPath),
+                  let data = try? Data(contentsOf: URL(fileURLWithPath: resolvedPath)) else {
+                return nil
+            }
+            return (asset.reference, "data:\(mimeType);base64,\(data.base64EncodedString())")
+        })
+        guard imageAssetsByReference.isEmpty == false else {
+            return html
+        }
+
+        let pattern = #"(src)\s*=\s*(["'])([^"']+)(["'])"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return html
+        }
+
+        var rendered = html
+        let matches = regex.matches(in: html, range: NSRange(html.startIndex..<html.endIndex, in: html))
+        for match in matches.reversed() {
+            guard let openingQuoteRange = Range(match.range(at: 2), in: rendered),
+                  let closingQuoteRange = Range(match.range(at: 4), in: rendered),
+                  rendered[openingQuoteRange] == rendered[closingQuoteRange],
+                  let fullRange = Range(match.range(at: 0), in: rendered),
+                  let referenceRange = Range(match.range(at: 3), in: rendered) else {
+                continue
+            }
+            let reference = String(rendered[referenceRange])
+            guard let dataURL = imageAssetsByReference[reference] else {
+                continue
+            }
+            let replacement = #"src="\#(dataURL)""#
+            rendered.replaceSubrange(fullRange, with: replacement)
+        }
+        return rendered
+    }
+
+    private func mimeType(for path: String) -> String? {
+        switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+        case "jpg", "jpeg":
+            return "image/jpeg"
+        case "png":
+            return "image/png"
+        case "gif":
+            return "image/gif"
+        case "heic", "heif":
+            return "image/heic"
+        case "tif", "tiff":
+            return "image/tiff"
+        case "webp":
+            return "image/webp"
+        case "svg":
+            return "image/svg+xml"
+        default:
+            return nil
+        }
     }
 }
 

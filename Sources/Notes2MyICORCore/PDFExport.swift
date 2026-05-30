@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import PDFKit
 import WebKit
 
@@ -70,6 +71,7 @@ public final class WebKitPDFRenderer: PDFRendering {
         webView.loadHTMLString(html, baseURL: baseURL)
 
         try session.waitForLoad(timeout: timeout)
+        try waitForImages(in: webView, timeout: timeout)
 
         let pdfConfiguration = WKPDFConfiguration()
         pdfConfiguration.rect = pageRect
@@ -88,6 +90,47 @@ public final class WebKitPDFRenderer: PDFRendering {
             throw PDFRenderError.timeout("creating PDF data")
         }
         return try pdfResult.get()
+    }
+
+    @MainActor
+    private static func waitForImages(in webView: WKWebView, timeout: TimeInterval) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastError: Error?
+
+        while Date() < deadline {
+            var evaluationResult: Result<Bool, Error>?
+            webView.evaluateJavaScript(
+                "Array.from(document.images).every(function(image) { return image.complete; })"
+            ) { value, error in
+                if let error {
+                    evaluationResult = .failure(error)
+                } else {
+                    evaluationResult = .success((value as? Bool) ?? true)
+                }
+            }
+
+            while evaluationResult == nil && Date() < deadline {
+                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.02))
+            }
+
+            switch evaluationResult {
+            case .success(true):
+                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+                return
+            case .success(false):
+                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+            case .failure(let error):
+                lastError = error
+                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+            case nil:
+                break
+            }
+        }
+
+        if let lastError {
+            throw PDFRenderError.navigationFailed(lastError.localizedDescription)
+        }
+        throw PDFRenderError.timeout("loading images")
     }
 }
 
@@ -462,6 +505,10 @@ public struct EmbeddedPDFExportProcessor {
             break
         }
 
+        let imageAppendResult = appendImageAssets(document.assets, to: outputPDFData)
+        outputPDFData = imageAppendResult.pdfData
+        warnings.append(contentsOf: imageAppendResult.warnings)
+
         let exportObjects = document.embeddedObjects.map { object in
             let exportedPath = object.resolvedPath.flatMap { exportedPaths[$0] }
             return NoteExportEmbeddedObject(
@@ -519,6 +566,46 @@ public struct EmbeddedPDFExportProcessor {
                 pdfData: pdfData,
                 embeddedObjects: [],
                 warnings: warnings + ["Embedded PDF append mode was requested, but the combined PDF could not be serialized."]
+            )
+        }
+
+        return EmbeddedPDFExportResult(pdfData: outputData, embeddedObjects: [], warnings: warnings)
+    }
+
+    private func appendImageAssets(
+        _ assets: [NoteDocumentAsset],
+        to pdfData: Data
+    ) -> EmbeddedPDFExportResult {
+        let imageAssets = assets.filter {
+            [.image, .sketchOrHandwriting, .scannedDocument].contains($0.kind) && $0.resolvedPath != nil
+        }
+        guard imageAssets.isEmpty == false else {
+            return EmbeddedPDFExportResult(pdfData: pdfData, embeddedObjects: [], warnings: [])
+        }
+        guard let outputDocument = PDFDocument(data: pdfData) else {
+            return EmbeddedPDFExportResult(
+                pdfData: pdfData,
+                embeddedObjects: [],
+                warnings: ["Image attachment append was requested, but the rendered note PDF could not be opened."]
+            )
+        }
+
+        var warnings: [String] = []
+        for asset in imageAssets {
+            guard let path = asset.resolvedPath,
+                  let image = NSImage(contentsOfFile: path),
+                  let page = PDFPage(image: image) else {
+                warnings.append("Image attachment could not be appended and remains linked in sidecar JSON: \(asset.reference)")
+                continue
+            }
+            outputDocument.insert(page, at: outputDocument.pageCount)
+        }
+
+        guard let outputData = outputDocument.dataRepresentation() else {
+            return EmbeddedPDFExportResult(
+                pdfData: pdfData,
+                embeddedObjects: [],
+                warnings: warnings + ["Image attachments were appended, but the combined PDF could not be serialized."]
             )
         }
 
