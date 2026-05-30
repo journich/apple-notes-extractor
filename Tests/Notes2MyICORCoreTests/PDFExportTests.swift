@@ -142,6 +142,36 @@ final class PDFExportTests: XCTestCase {
         XCTAssertEqual(result.warnings, [])
     }
 
+    func testInlineImageAssetsAreNotAppendedAsDuplicatePages() throws {
+        let directory = try TemporaryDirectory()
+        let imageURL = directory.url.appendingPathComponent("drawing.png")
+        try makeImageData().write(to: imageURL)
+        let document = fixtureDocument(
+            htmlContent: #"<p><img src="drawing.png"></p>"#,
+            assets: [
+                NoteDocumentAsset(
+                    reference: "drawing.png",
+                    resolvedPath: imageURL.path,
+                    hashKey: "drawing.png",
+                    kind: .sketchOrHandwriting,
+                    exists: true
+                ),
+            ]
+        )
+
+        let result = try EmbeddedPDFExportProcessor().process(
+            pdfData: try makePDFData(),
+            document: document,
+            outputDirectory: directory.url,
+            baseFilename: "note-uuid - Fixture",
+            mode: .append
+        )
+
+        let pdf = try XCTUnwrap(PDFDocument(data: result.pdfData))
+        XCTAssertEqual(pdf.pageCount, 1)
+        XCTAssertEqual(result.warnings, [])
+    }
+
     func testExistingPDFReplacementIsAtomicWherePractical() throws {
         let directory = try TemporaryDirectory()
         let writer = NoteExportWriter()
@@ -178,7 +208,7 @@ final class PDFExportTests: XCTestCase {
             options: NoteExportOptions(outputDirectory: directory.url, writeDebugHTML: true)
         )
 
-        XCTAssertTrue(renderer.renderedHTML.contains("notes2myicor-metadata"))
+        XCTAssertFalse(renderer.renderedHTML.contains("notes2myicor-metadata"))
         XCTAssertEqual(try String(contentsOf: result.pdfURL), "%PDF fake")
         XCTAssertNotNil(result.sidecarURL)
         XCTAssertNotNil(result.debugHTMLURL)
@@ -187,6 +217,7 @@ final class PDFExportTests: XCTestCase {
     private func fixtureDocument(
         title: String = "Fixture",
         folderPath: String? = "Capture",
+        htmlContent: String = "<p>Body</p>",
         assets: [NoteDocumentAsset] = [],
         embeddedObjects: [NoteDocumentEmbeddedObject] = []
     ) -> NoteDocument {
@@ -198,7 +229,7 @@ final class PDFExportTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 1),
             modifiedAt: Date(timeIntervalSince1970: 2),
             htmlPath: nil,
-            htmlContent: "<p>Body</p>",
+            htmlContent: htmlContent,
             assets: assets,
             embeddedObjects: embeddedObjects,
             warnings: ["fixture warning"]

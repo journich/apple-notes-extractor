@@ -147,7 +147,7 @@ swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_c
 
 By default the parser is run with Homebrew Ruby at `/opt/homebrew/opt/ruby/bin/ruby`, and its JSON output is decoded from `notes_rip/json/all_notes_1.json`.
 
-Stage 8 adds the internal `NoteDocument` model used by later PDF export stages. Parser output is normalized into note documents with metadata slots, asset references, warnings, renderable HTML, and SHA-256 content hashes.
+Stage 8 adds the internal `NoteDocument` model used by later PDF export stages. Parser output is normalized into note documents with metadata slots, asset references, warnings, renderable HTML, and SHA-256 content hashes. For Apple Cloud Notes Parser HTML, the app renders only the actual note content section and strips the parser's index/navigation/metadata wrapper from generated PDFs.
 
 To write renderable debug HTML while testing parser output, provide a temporary output directory:
 
@@ -171,7 +171,7 @@ For a synthetic or debug HTML fixture:
 swift run notes2myicor export --note-uuid fixture-uuid --title "Fixture" --html /tmp/fixture.html --output-dir /tmp/notes2myicor-export --debug-html
 ```
 
-Exports write a PDF and sidecar JSON. `--debug-html` also writes the rendered HTML next to the PDF. Output files may contain note contents; keep test output local and untracked.
+Exports write a PDF and sidecar JSON. PDF bodies are content-first; app metadata is kept in sidecar JSON and the app-owned state database rather than rendered as a visible PDF header. `--debug-html` also writes the rendered HTML next to the PDF. Output files may contain note contents; keep test output local and untracked.
 
 Stage 10 adds the first full MVP sync command:
 
@@ -180,7 +180,7 @@ swift run notes2myicor sync --once --account "iCloud" --folder "Capture" --recur
 swift run notes2myicor sync --once --dry-run --account "iCloud" --folder "Capture" --recursive
 ```
 
-`sync --once` reads the Notes inventory, classifies changes, parses changed notes, writes PDFs and sidecar JSON, and updates the app-owned state database only after successful export. `--dry-run` reports planned work without parsing, exporting, or updating note state. Current sync state stores Apple Notes folder object IDs for change comparison; sidecar JSON and exported documents still use human folder paths.
+`sync --once` reads the Notes inventory, classifies changes, parses changed notes, writes PDFs and sidecar JSON, and updates the app-owned state database only after successful export. `--dry-run` reports planned work without parsing, exporting, or updating note state. Current sync state stores Apple Notes folder object IDs for change comparison; sidecar JSON and exported documents still use human folder paths. If the external parser returns only a subset of requested notes, sync exports the notes it can parse and marks only the missing parser results as failed.
 
 Stage 11 adds conservative deletion and out-of-scope handling. The default policy is mark-only:
 
@@ -227,7 +227,7 @@ Stage 15 adds embedded-object classification around parser HTML output:
 - sidecar JSON includes `embedded_pdf_mode` and an `embedded_objects` list;
 - embedded PDF mode defaults to `append`, with `separate` and `link-only` supported in the export layer. Append uses PDFKit when the embedded PDF asset can be opened; separate mode copies embedded PDFs next to the rendered note PDF.
 
-Sketch/handwriting support currently depends on the parser emitting a file reference, usually an image, whose path or filename can be classified from generic drawing/handwriting hints. Real Apple Notes output can represent embedded objects differently across macOS versions, so unsupported objects are intentionally recorded instead of silently dropped.
+Sketch/handwriting support currently depends on the parser emitting a file reference, usually an image, whose path or filename can be classified from generic drawing/handwriting hints. Parser preview links are promoted to the full fallback image when available, images are scaled to the PDF page width, and duplicate image-append pages are avoided when the image is already rendered inline. Real Apple Notes output can represent embedded objects differently across macOS versions, so unsupported objects are intentionally recorded instead of silently dropped.
 
 Stage 16 adds release-readiness artifacts:
 

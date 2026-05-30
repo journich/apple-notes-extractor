@@ -36,6 +36,28 @@ final class AppleCloudNotesParserTests: XCTestCase {
         XCTAssertEqual(result.notes[0].html, "<p>Body</p>")
     }
 
+    func testParserAllowsPartialResultsForRequestedUUIDs() throws {
+        let directory = try TemporaryDirectory()
+        let parserScript = directory.url.appendingPathComponent("notes_cloud_ripper.rb")
+        let notesContainer = directory.url.appendingPathComponent("group.com.apple.notes", isDirectory: true)
+        let outputDirectory = directory.url.appendingPathComponent("parser-output", isDirectory: true)
+        try Data("# parser".utf8).write(to: parserScript)
+        try FileManager.default.createDirectory(at: notesContainer, withIntermediateDirectories: true)
+
+        let parser = AppleCloudNotesParser(
+            config: AppleCloudNotesParserConfig(
+                rubyExecutablePath: "/ruby",
+                parserScriptPath: parserScript.path,
+                outputDirectory: outputDirectory
+            ),
+            runner: FakeParserRunner(outputDirectory: outputDirectory)
+        )
+
+        let result = try parser.parse(notesContainer: notesContainer, noteUUIDs: ["note-uuid", "missing-note"])
+
+        XCTAssertEqual(result.notes.map(\.uuid), ["note-uuid"])
+    }
+
     func testParserSurfacesSubprocessFailure() throws {
         let directory = try TemporaryDirectory()
         let parserScript = directory.url.appendingPathComponent("notes_cloud_ripper.rb")
@@ -127,6 +149,52 @@ final class AppleCloudNotesParserTests: XCTestCase {
             notes[0].individualHTMLPath.map { URL(fileURLWithPath: $0).standardizedFileURL.path },
             html.standardizedFileURL.path
         )
+    }
+
+    func testJSONDecoderExtractsNoteContentFromParserHTMLWrapper() throws {
+        let directory = try TemporaryDirectory()
+        let output = directory.url.appendingPathComponent("notes_rip", isDirectory: true)
+        let json = output.appendingPathComponent("json/all_notes_1.json")
+        let html = output
+            .appendingPathComponent("html/note_store1/iCloud-Inbox", isDirectory: true)
+            .appendingPathComponent("C3517DF0-F82C-4874-A400-633114484564 - Random Notes..html")
+        try FileManager.default.createDirectory(at: json.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: html.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(
+            """
+            <html><body><div class="note-card">
+            <h1>Note metadata wrapper</h1>
+            <div><b>Account:</b> iCloud</div>
+            <div class="note-content">
+            <a href="../../../files/FallbackImage.png" class="attr"><img src="../../../files/Preview.png"></a><br>
+            </div>
+            </div></body></html>
+            """.utf8
+        ).write(to: html)
+        try Data(
+            """
+            {
+              "notes": {
+                "1": {
+                  "uuid": "C3517DF0-F82C-4874-A400-633114484564",
+                  "title": "Wanted",
+                  "html": "<p>JSON fallback</p>"
+                }
+              }
+            }
+            """.utf8
+        ).write(to: json)
+
+        let notes = try AppleCloudNotesJSONDecoder().decodeNotes(
+            jsonPath: json,
+            outputDirectory: output,
+            noteUUIDs: ["C3517DF0-F82C-4874-A400-633114484564"]
+        )
+
+        XCTAssertFalse(notes[0].html.contains("Note metadata wrapper"))
+        XCTAssertFalse(notes[0].html.contains("Account:"))
+        XCTAssertFalse(notes[0].html.contains("Preview.png"))
+        XCTAssertTrue(notes[0].html.contains(#"<img src="../../../files/FallbackImage.png">"#))
     }
 
     func testJSONDecoderReportsMissingRequestedNote() throws {

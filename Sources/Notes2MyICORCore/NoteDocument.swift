@@ -404,6 +404,18 @@ public struct NoteDocumentHTMLRenderer {
         <meta charset="utf-8">
         <title>\(escapeText(document.title))</title>
         \(baseTag)
+        <style>
+        body {
+          margin: 36px;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        img {
+          display: block;
+          max-width: 100%;
+          height: auto;
+          page-break-inside: avoid;
+        }
+        </style>
         </head>
         <body>
         \(metadata)

@@ -505,7 +505,7 @@ public struct EmbeddedPDFExportProcessor {
             break
         }
 
-        let imageAppendResult = appendImageAssets(document.assets, to: outputPDFData)
+        let imageAppendResult = appendImageAssets(imageAssetsToAppend(for: document), to: outputPDFData)
         outputPDFData = imageAppendResult.pdfData
         warnings.append(contentsOf: imageAppendResult.warnings)
 
@@ -612,6 +612,32 @@ public struct EmbeddedPDFExportProcessor {
         return EmbeddedPDFExportResult(pdfData: outputData, embeddedObjects: [], warnings: warnings)
     }
 
+    private func imageAssetsToAppend(for document: NoteDocument) -> [NoteDocumentAsset] {
+        let inlineImageReferences = imageSourceReferences(in: document.htmlContent)
+        return document.assets.filter { asset in
+            [.image, .sketchOrHandwriting, .scannedDocument].contains(asset.kind)
+                && asset.resolvedPath != nil
+                && inlineImageReferences.contains(asset.reference) == false
+        }
+    }
+
+    private func imageSourceReferences(in html: String) -> Set<String> {
+        let pattern = #"<img\b[^>]*\bsrc\s*=\s*(["'])([^"']+)\1"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return []
+        }
+
+        var references = Set<String>()
+        let matches = regex.matches(in: html, range: NSRange(html.startIndex..<html.endIndex, in: html))
+        for match in matches {
+            guard let range = Range(match.range(at: 2), in: html) else {
+                continue
+            }
+            references.insert(String(html[range]))
+        }
+        return references
+    }
+
     private func copyEmbeddedPDFs(
         _ embeddedPDFs: [NoteDocumentEmbeddedObject],
         to outputDirectory: URL,
@@ -673,7 +699,7 @@ public struct NoteExporter {
     }
 
     public func export(document: NoteDocument, options: NoteExportOptions) throws -> NoteExportResult {
-        let html = htmlRenderer.render(document)
+        let html = htmlRenderer.render(document, includeMetadataHeader: false)
         let baseURL = document.htmlPath.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
         let pdfData = try pdfRenderer.renderPDF(html: html, baseURL: baseURL)
         return try writer.write(document: document, pdfData: pdfData, options: options)

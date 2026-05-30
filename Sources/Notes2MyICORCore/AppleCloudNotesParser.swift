@@ -173,7 +173,8 @@ public struct AppleCloudNotesParser {
         let notes = try AppleCloudNotesJSONDecoder(fileManager: fileManager).decodeNotes(
             jsonPath: jsonPath,
             outputDirectory: config.outputDirectory.appendingPathComponent("notes_rip", isDirectory: true),
-            noteUUIDs: Set(noteUUIDs)
+            noteUUIDs: Set(noteUUIDs),
+            requireAllRequestedNotes: false
         )
 
         return AppleCloudNotesParserResult(
@@ -195,7 +196,12 @@ public struct AppleCloudNotesJSONDecoder {
         self.fileManager = fileManager
     }
 
-    public func decodeNotes(jsonPath: URL, outputDirectory: URL, noteUUIDs: Set<String>) throws -> [AppleCloudNotesParsedNote] {
+    public func decodeNotes(
+        jsonPath: URL,
+        outputDirectory: URL,
+        noteUUIDs: Set<String>,
+        requireAllRequestedNotes: Bool = true
+    ) throws -> [AppleCloudNotesParsedNote] {
         guard fileManager.fileExists(atPath: jsonPath.path) else {
             throw AppleCloudNotesParserError.jsonOutputMissing(jsonPath.path)
         }
@@ -220,9 +226,7 @@ public struct AppleCloudNotesJSONDecoder {
             }
 
             let individualHTMLPath = htmlPathsByUUID[uuid]
-            let html = individualHTMLPath.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
-                ?? note["html"] as? String
-                ?? ""
+            let html = htmlForNote(individualHTMLPath: individualHTMLPath, fallbackHTML: note["html"] as? String)
 
             return AppleCloudNotesParsedNote(
                 uuid: uuid,
@@ -233,8 +237,10 @@ public struct AppleCloudNotesJSONDecoder {
             )
         }
 
-        for uuid in noteUUIDs where notes.contains(where: { $0.uuid == uuid }) == false {
-            throw AppleCloudNotesParserError.noteNotFound(uuid)
+        if requireAllRequestedNotes {
+            for uuid in noteUUIDs where notes.contains(where: { $0.uuid == uuid }) == false {
+                throw AppleCloudNotesParserError.noteNotFound(uuid)
+            }
         }
 
         return notes.sorted { $0.uuid < $1.uuid }
@@ -263,6 +269,70 @@ public struct AppleCloudNotesJSONDecoder {
             return nil
         }
         return String(filename[range]).uppercased()
+    }
+
+    private func htmlForNote(individualHTMLPath: URL?, fallbackHTML: String?) -> String {
+        guard let individualHTMLPath,
+              let rawHTML = try? String(contentsOf: individualHTMLPath, encoding: .utf8) else {
+            return fallbackHTML ?? ""
+        }
+
+        let contentHTML = extractNoteContentHTML(from: rawHTML) ?? rawHTML
+        return promoteParserFallbackImageLinks(in: contentHTML)
+    }
+
+    private func extractNoteContentHTML(from html: String) -> String? {
+        let pattern = #"<div\b[^>]*class\s*=\s*["'][^"']*\bnote-content\b[^"']*["'][^>]*>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..<html.endIndex, in: html)),
+              let openingRange = Range(match.range, in: html) else {
+            return nil
+        }
+
+        let contentStart = openingRange.upperBound
+        let tagPattern = #"<(/?)div\b[^>]*>"#
+        guard let tagRegex = try? NSRegularExpression(pattern: tagPattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+
+        var depth = 1
+        let searchRange = NSRange(contentStart..<html.endIndex, in: html)
+        let tags = tagRegex.matches(in: html, range: searchRange)
+        for tag in tags {
+            guard let tagRange = Range(tag.range, in: html),
+                  let slashRange = Range(tag.range(at: 1), in: html) else {
+                continue
+            }
+            if html[slashRange].isEmpty {
+                depth += 1
+            } else {
+                depth -= 1
+                if depth == 0 {
+                    return String(html[contentStart..<tagRange.lowerBound])
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func promoteParserFallbackImageLinks(in html: String) -> String {
+        let pattern = #"<a\b[^>]*href\s*=\s*(["'])([^"']+FallbackImage\.[^"']+)\1[^>]*>\s*<img\b[^>]*>\s*</a>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return html
+        }
+
+        var rendered = html
+        let matches = regex.matches(in: html, range: NSRange(html.startIndex..<html.endIndex, in: html))
+        for match in matches.reversed() {
+            guard let fullRange = Range(match.range(at: 0), in: rendered),
+                  let hrefRange = Range(match.range(at: 2), in: rendered) else {
+                continue
+            }
+            let href = String(rendered[hrefRange])
+            rendered.replaceSubrange(fullRange, with: #"<img src="\#(href)">"#)
+        }
+        return rendered
     }
 }
 
