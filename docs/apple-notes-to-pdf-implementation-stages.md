@@ -720,15 +720,19 @@ Implementation notes:
 
 ## Stage 13: Real Apple Notes Test Corpus
 
+Status: adapted for full-account read-only testing.
+
 ### Goal
 
 Create and document a controlled real-world Apple Notes folder used for acceptance testing.
 
-This stage is partly manual because it depends on creating representative notes on an iPad.
+This stage is partly manual because it depends on representative real notes synced from Apple Notes.
+For this project run the corpus against the account root with `--folder /`, which includes every folder in the selected Apple Notes account.
+Generated PDFs, sidecar JSON, parser output, state databases, logs, and snapshots from this stage remain local only and must not be committed.
 
 ### Implementation tasks
 
-- Create test folder, for example `myICOR Capture Test`.
+- Use the Apple Notes account root with `--folder /`.
 - Add documented test notes.
 - Add acceptance checklist.
 - Capture expected behavior for each note.
@@ -767,7 +771,7 @@ Recommended test notes:
 
 - Create each test note on iPad.
 - Wait for iCloud sync to Mac.
-- Run `notes2myicor sync --once`.
+- Run `notes2myicor sync --once --account "iCloud" --folder /`.
 - Confirm each expected PDF appears.
 - Open each PDF and verify readability.
 - Confirm sidecar JSON metadata.
@@ -780,6 +784,17 @@ Recommended test notes:
 - The MVP works against real Apple Notes data.
 - Known unsupported features are documented.
 - Regression fixtures exist for bugs found during corpus testing.
+
+### Manual result
+
+Root-account testing was run with private generated artifacts kept under `/tmp` and outside the repository:
+
+- `sync --once --dry-run --account "iCloud" --folder /` found 19 in-scope notes.
+- `sync --once --account "iCloud" --folder /` exported 19 PDFs and 19 sidecar JSON files with 0 failures.
+- A second run against the same temporary state classified all 19 notes as unchanged and exported 0 files.
+- Non-content validation confirmed all generated files with `.pdf` extension were PDF documents.
+
+No real note titles, note bodies, sidecar JSON, parser output, state databases, logs, snapshots, or PDFs were staged or committed.
 
 ---
 

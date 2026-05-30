@@ -10,7 +10,7 @@ final class AppleNotesScopeResolverTests: XCTestCase {
         )
 
         XCTAssertEqual(resolution.account.objectID, 100)
-        XCTAssertEqual(resolution.rootFolder.objectID, 200)
+        XCTAssertEqual(resolution.rootFolder?.objectID, 200)
         XCTAssertEqual(resolution.allowedFolderIDs, [200])
     }
 
@@ -20,7 +20,7 @@ final class AppleNotesScopeResolverTests: XCTestCase {
             inventory: scopeFixtureInventory()
         )
 
-        XCTAssertEqual(resolution.rootFolder.objectID, 201)
+        XCTAssertEqual(resolution.rootFolder?.objectID, 201)
         XCTAssertEqual(resolution.rootFolderPath, "Capture/Sketches")
     }
 
@@ -48,7 +48,7 @@ final class AppleNotesScopeResolverTests: XCTestCase {
             inventory: scopeFixtureInventory()
         )
 
-        XCTAssertEqual(resolution.rootFolder.objectID, 204)
+        XCTAssertEqual(resolution.rootFolder?.objectID, 204)
     }
 
     func testDuplicateFolderNamesUnderDifferentAccountsResolveByAccount() throws {
@@ -58,7 +58,18 @@ final class AppleNotesScopeResolverTests: XCTestCase {
         )
 
         XCTAssertEqual(resolution.account.objectID, 101)
-        XCTAssertEqual(resolution.rootFolder.objectID, 300)
+        XCTAssertEqual(resolution.rootFolder?.objectID, 300)
+    }
+
+    func testSlashFolderPathResolvesAllAccountFolders() throws {
+        let resolution = try AppleNotesScopeResolver().resolve(
+            AppleNotesScopeRequest(accountName: "iCloud", folderPath: "/", recursive: true),
+            inventory: scopeFixtureInventory()
+        )
+
+        XCTAssertNil(resolution.rootFolder)
+        XCTAssertEqual(resolution.rootFolderPath, "/")
+        XCTAssertEqual(resolution.allowedFolderIDs, [200, 201, 202, 203, 204])
     }
 
     func testMissingAccountProducesClearError() {
@@ -108,6 +119,18 @@ final class AppleNotesScopeResolverTests: XCTestCase {
         XCTAssertTrue(formatted.contains("Resolved scope:"))
         XCTAssertTrue(formatted.contains("Allowed folders: 3"))
         XCTAssertTrue(formatted.contains("Capture/Sketches/Deep"))
+    }
+
+    func testFormatterPrintsAccountRootForAllFoldersScope() throws {
+        let resolution = try AppleNotesScopeResolver().resolve(
+            AppleNotesScopeRequest(accountName: "iCloud", folderPath: "/", recursive: true),
+            inventory: scopeFixtureInventory()
+        )
+
+        let formatted = ScopeResolutionFormatter().format(resolution)
+
+        XCTAssertTrue(formatted.contains("Root folder: / [account root]"))
+        XCTAssertTrue(formatted.contains("Allowed folders: 5"))
     }
 }
 

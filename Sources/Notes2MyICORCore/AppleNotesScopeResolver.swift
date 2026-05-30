@@ -1,6 +1,8 @@
 import Foundation
 
 public struct AppleNotesScopeRequest: Equatable, Sendable {
+    public static let allFoldersPath = "/"
+
     public var accountName: String
     public var folderPath: String
     public var recursive: Bool
@@ -14,14 +16,14 @@ public struct AppleNotesScopeRequest: Equatable, Sendable {
 
 public struct AppleNotesScopeResolution: Equatable, Sendable {
     public var account: AppleNotesAccount
-    public var rootFolder: AppleNotesFolder
+    public var rootFolder: AppleNotesFolder?
     public var rootFolderPath: String
     public var allowedFolderIDs: Set<Int>
     public var folderPathsByID: [Int: String]
 
     public init(
         account: AppleNotesAccount,
-        rootFolder: AppleNotesFolder,
+        rootFolder: AppleNotesFolder?,
         rootFolderPath: String,
         allowedFolderIDs: Set<Int>,
         folderPathsByID: [Int: String]
@@ -61,6 +63,16 @@ public struct AppleNotesScopeResolver {
 
         let accountFolders = inventory.folders.filter { $0.accountObjectID == account.objectID }
         let paths = FolderPathBuilder(folders: accountFolders).pathsByFolderID()
+        if request.folderPath == AppleNotesScopeRequest.allFoldersPath || request.folderPath.isEmpty {
+            return AppleNotesScopeResolution(
+                account: account,
+                rootFolder: nil,
+                rootFolderPath: AppleNotesScopeRequest.allFoldersPath,
+                allowedFolderIDs: Set(accountFolders.map(\.objectID)),
+                folderPathsByID: paths
+            )
+        }
+
         let matches = accountFolders.filter { paths[$0.objectID] == request.folderPath }
 
         guard matches.isEmpty == false else {
@@ -115,7 +127,11 @@ public struct ScopeResolutionFormatter {
         var lines: [String] = []
         lines.append("Resolved scope:")
         lines.append("Account: \(resolution.account.name) [id=\(resolution.account.objectID), uuid=\(resolution.account.uuid)]")
-        lines.append("Root folder: \(resolution.rootFolderPath) [id=\(resolution.rootFolder.objectID), uuid=\(resolution.rootFolder.uuid)]")
+        if let rootFolder = resolution.rootFolder {
+            lines.append("Root folder: \(resolution.rootFolderPath) [id=\(rootFolder.objectID), uuid=\(rootFolder.uuid)]")
+        } else {
+            lines.append("Root folder: \(resolution.rootFolderPath) [account root]")
+        }
         lines.append("Allowed folders: \(resolution.allowedFolderIDs.count)")
 
         for folderID in resolution.allowedFolderIDs.sorted() {

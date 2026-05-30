@@ -35,6 +35,7 @@ swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_c
 swift run notes2myicor export --note-uuid <uuid> --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
 swift run notes2myicor sync --once --account "iCloud" --folder "Capture" --recursive --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
 swift run notes2myicor sync --once --dry-run --account "iCloud" --folder "Capture" --recursive
+swift run notes2myicor sync --once --dry-run --account "iCloud" --folder /
 swift run notes2myicor sync --watch --interval-seconds 300 --account "iCloud" --folder "Capture" --recursive
 swift run notes2myicor install-launch-agent --binary /path/to/notes2myicor --interval-seconds 300 --account "iCloud" --folder "Capture" --recursive
 swift run notes2myicor launch-agent-status
@@ -91,9 +92,11 @@ Stage 3 adds duplicate-safe folder scope resolution:
 
 ```bash
 swift run notes2myicor resolve-scope --account "iCloud" --folder "Capture" --recursive
+swift run notes2myicor resolve-scope --account "iCloud" --folder /
 ```
 
 The resolver uses account name plus full folder path, then returns the root folder and allowed descendant folder IDs.
+Use `--folder /` to select every folder in the account.
 
 Stage 4 adds the app-owned state database:
 
@@ -181,3 +184,12 @@ swift run notes2myicor uninstall-launch-agent
 ```
 
 `sync --watch` runs `sync --once` serially and sleeps between runs, so it does not start a new sync while a previous sync is still running. `install-launch-agent` writes a LaunchAgent plist, defaulting to `~/Library/LaunchAgents/com.journich.notes2myicor.plist`, with logs under `~/Library/Logs/Notes2MyICOR`. Use `--binary` with an installed absolute executable path; relative, missing, non-executable, or directory paths are refused. The command writes the plist only; load or unload it with `launchctl` when you are ready to enable or disable scheduled background execution in your macOS session.
+
+Stage 13 validates the MVP against real Apple Notes data using account-root scope:
+
+```bash
+swift run notes2myicor sync --once --dry-run --account "iCloud" --folder /
+swift run notes2myicor sync --once --account "iCloud" --folder / --parser-script /path/to/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
+```
+
+Real export output contains private note content. Keep generated PDFs, sidecar JSON, parser output, state databases, logs, and snapshots local and untracked.
