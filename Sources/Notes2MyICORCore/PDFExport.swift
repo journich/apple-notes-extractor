@@ -1,4 +1,5 @@
 import Foundation
+import PDFKit
 import WebKit
 
 public protocol PDFRendering {
@@ -127,17 +128,34 @@ public struct NoteExportOptions: Equatable, Sendable {
     public var mirrorFolderTree: Bool
     public var writeSidecarJSON: Bool
     public var writeDebugHTML: Bool
+    public var embeddedPDFMode: EmbeddedPDFMode
 
     public init(
         outputDirectory: URL,
         mirrorFolderTree: Bool = true,
         writeSidecarJSON: Bool = true,
-        writeDebugHTML: Bool = false
+        writeDebugHTML: Bool = false,
+        embeddedPDFMode: EmbeddedPDFMode = .append
     ) {
         self.outputDirectory = outputDirectory
         self.mirrorFolderTree = mirrorFolderTree
         self.writeSidecarJSON = writeSidecarJSON
         self.writeDebugHTML = writeDebugHTML
+        self.embeddedPDFMode = embeddedPDFMode
+    }
+}
+
+public enum EmbeddedPDFMode: String, Codable, Equatable, Sendable {
+    case append
+    case separate
+    case linkOnly = "link-only"
+
+    public init(configValue: String, appendEmbeddedPDFs: Bool = true) {
+        if appendEmbeddedPDFs == false {
+            self = .linkOnly
+            return
+        }
+        self = EmbeddedPDFMode(rawValue: configValue) ?? .append
     }
 }
 
@@ -166,6 +184,8 @@ public struct NoteExportSidecar: Codable, Equatable, Sendable {
     public var exportedAt: Date
     public var contentHash: String
     public var pdfPath: String
+    public var embeddedPDFMode: EmbeddedPDFMode
+    public var embeddedObjects: [NoteExportEmbeddedObject]
     public var warnings: [String]
 
     public init(
@@ -179,6 +199,8 @@ public struct NoteExportSidecar: Codable, Equatable, Sendable {
         exportedAt: Date,
         contentHash: String,
         pdfPath: String,
+        embeddedPDFMode: EmbeddedPDFMode = .append,
+        embeddedObjects: [NoteExportEmbeddedObject] = [],
         warnings: [String]
     ) {
         self.source = source
@@ -191,6 +213,8 @@ public struct NoteExportSidecar: Codable, Equatable, Sendable {
         self.exportedAt = exportedAt
         self.contentHash = contentHash
         self.pdfPath = pdfPath
+        self.embeddedPDFMode = embeddedPDFMode
+        self.embeddedObjects = embeddedObjects
         self.warnings = warnings
     }
 
@@ -205,7 +229,43 @@ public struct NoteExportSidecar: Codable, Equatable, Sendable {
         case exportedAt = "exported_at"
         case contentHash = "content_hash"
         case pdfPath = "pdf_path"
+        case embeddedPDFMode = "embedded_pdf_mode"
+        case embeddedObjects = "embedded_objects"
         case warnings
+    }
+}
+
+public struct NoteExportEmbeddedObject: Codable, Equatable, Sendable {
+    public var kind: NoteDocumentEmbeddedObjectKind
+    public var reference: String?
+    public var resolvedPath: String?
+    public var exportedPath: String?
+    public var status: NoteDocumentEmbeddedObjectStatus
+    public var detail: String?
+
+    public init(
+        kind: NoteDocumentEmbeddedObjectKind,
+        reference: String?,
+        resolvedPath: String?,
+        exportedPath: String? = nil,
+        status: NoteDocumentEmbeddedObjectStatus,
+        detail: String? = nil
+    ) {
+        self.kind = kind
+        self.reference = reference
+        self.resolvedPath = resolvedPath
+        self.exportedPath = exportedPath
+        self.status = status
+        self.detail = detail
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case reference
+        case resolvedPath = "resolved_path"
+        case exportedPath = "exported_path"
+        case status
+        case detail
     }
 }
 
@@ -285,12 +345,20 @@ public struct NoteExportWriter {
 
         let base = namer.baseFilename(for: document)
         let pdfURL = directory.appendingPathComponent(base).appendingPathExtension("pdf")
-        try pdfData.write(to: pdfURL, options: .atomic)
+        let embeddedPDFResult = try EmbeddedPDFExportProcessor(fileManager: fileManager).process(
+            pdfData: pdfData,
+            document: document,
+            outputDirectory: directory,
+            baseFilename: base,
+            mode: options.embeddedPDFMode
+        )
+        try embeddedPDFResult.pdfData.write(to: pdfURL, options: .atomic)
 
         let contentHash = "sha256:\(hasher.contentHash(for: document))"
         let sidecarURL: URL?
         if options.writeSidecarJSON {
             sidecarURL = directory.appendingPathComponent(base).appendingPathExtension("json")
+            let warnings = uniqueWarnings(document.warnings + embeddedPDFResult.warnings)
             let sidecar = NoteExportSidecar(
                 noteUUID: document.uuid,
                 title: document.title,
@@ -301,7 +369,9 @@ public struct NoteExportWriter {
                 exportedAt: exportedAt,
                 contentHash: contentHash,
                 pdfPath: pdfURL.path,
-                warnings: document.warnings
+                embeddedPDFMode: options.embeddedPDFMode,
+                embeddedObjects: embeddedPDFResult.embeddedObjects,
+                warnings: warnings
             )
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -334,6 +404,168 @@ public struct NoteExportWriter {
 
         return namer.folderComponents(for: document.folderPath).reduce(options.outputDirectory) { url, component in
             url.appendingPathComponent(component, isDirectory: true)
+        }
+    }
+
+    private func uniqueWarnings(_ warnings: [String]) -> [String] {
+        var seen: Set<String> = []
+        return warnings.filter { warning in
+            if seen.contains(warning) {
+                return false
+            }
+            seen.insert(warning)
+            return true
+        }
+    }
+}
+
+public struct EmbeddedPDFExportResult: Equatable, Sendable {
+    public var pdfData: Data
+    public var embeddedObjects: [NoteExportEmbeddedObject]
+    public var warnings: [String]
+}
+
+public struct EmbeddedPDFExportProcessor {
+    public let fileManager: FileManager
+
+    public init(fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+    }
+
+    public func process(
+        pdfData: Data,
+        document: NoteDocument,
+        outputDirectory: URL,
+        baseFilename: String,
+        mode: EmbeddedPDFMode
+    ) throws -> EmbeddedPDFExportResult {
+        var warnings: [String] = []
+        var exportedPaths: [String: String] = [:]
+        var outputPDFData = pdfData
+
+        let embeddedPDFs = document.embeddedObjects.filter {
+            $0.kind == .pdf && $0.status != .missing && $0.resolvedPath != nil
+        }
+
+        switch mode {
+        case .append:
+            let appendResult = appendEmbeddedPDFs(embeddedPDFs, to: pdfData)
+            outputPDFData = appendResult.pdfData
+            warnings.append(contentsOf: appendResult.warnings)
+        case .separate:
+            exportedPaths = try copyEmbeddedPDFs(
+                embeddedPDFs,
+                to: outputDirectory,
+                baseFilename: baseFilename
+            )
+        case .linkOnly:
+            break
+        }
+
+        let exportObjects = document.embeddedObjects.map { object in
+            let exportedPath = object.resolvedPath.flatMap { exportedPaths[$0] }
+            return NoteExportEmbeddedObject(
+                kind: object.kind,
+                reference: object.reference,
+                resolvedPath: object.resolvedPath,
+                exportedPath: exportedPath,
+                status: object.status,
+                detail: exportDetail(for: object, mode: mode, exportedPath: exportedPath)
+            )
+        }
+
+        return EmbeddedPDFExportResult(
+            pdfData: outputPDFData,
+            embeddedObjects: exportObjects,
+            warnings: warnings
+        )
+    }
+
+    private func appendEmbeddedPDFs(
+        _ embeddedPDFs: [NoteDocumentEmbeddedObject],
+        to pdfData: Data
+    ) -> EmbeddedPDFExportResult {
+        guard embeddedPDFs.isEmpty == false else {
+            return EmbeddedPDFExportResult(pdfData: pdfData, embeddedObjects: [], warnings: [])
+        }
+        guard let outputDocument = PDFDocument(data: pdfData) else {
+            return EmbeddedPDFExportResult(
+                pdfData: pdfData,
+                embeddedObjects: [],
+                warnings: ["Embedded PDF append mode was requested, but the rendered note PDF could not be opened for appending."]
+            )
+        }
+
+        var warnings: [String] = []
+        for embeddedPDF in embeddedPDFs {
+            guard let path = embeddedPDF.resolvedPath else {
+                continue
+            }
+            let attachmentURL = URL(fileURLWithPath: path)
+            guard let attachmentDocument = PDFDocument(url: attachmentURL), attachmentDocument.pageCount > 0 else {
+                warnings.append("Embedded PDF could not be appended and remains linked in sidecar JSON: \(embeddedPDF.reference ?? path)")
+                continue
+            }
+            for pageIndex in 0..<attachmentDocument.pageCount {
+                guard let page = attachmentDocument.page(at: pageIndex) else {
+                    continue
+                }
+                outputDocument.insert(page, at: outputDocument.pageCount)
+            }
+        }
+
+        guard let outputData = outputDocument.dataRepresentation() else {
+            return EmbeddedPDFExportResult(
+                pdfData: pdfData,
+                embeddedObjects: [],
+                warnings: warnings + ["Embedded PDF append mode was requested, but the combined PDF could not be serialized."]
+            )
+        }
+
+        return EmbeddedPDFExportResult(pdfData: outputData, embeddedObjects: [], warnings: warnings)
+    }
+
+    private func copyEmbeddedPDFs(
+        _ embeddedPDFs: [NoteDocumentEmbeddedObject],
+        to outputDirectory: URL,
+        baseFilename: String
+    ) throws -> [String: String] {
+        var exportedPaths: [String: String] = [:]
+        for (index, embeddedPDF) in embeddedPDFs.enumerated() {
+            guard let sourcePath = embeddedPDF.resolvedPath else {
+                continue
+            }
+            let sourceURL = URL(fileURLWithPath: sourcePath)
+            let attachmentURL = outputDirectory
+                .appendingPathComponent("\(baseFilename) - embedded-\(index + 1)")
+                .appendingPathExtension("pdf")
+            if fileManager.fileExists(atPath: attachmentURL.path) {
+                try fileManager.removeItem(at: attachmentURL)
+            }
+            try fileManager.copyItem(at: sourceURL, to: attachmentURL)
+            exportedPaths[sourcePath] = attachmentURL.path
+        }
+        return exportedPaths
+    }
+
+    private func exportDetail(
+        for object: NoteDocumentEmbeddedObject,
+        mode: EmbeddedPDFMode,
+        exportedPath: String?
+    ) -> String? {
+        guard object.kind == .pdf else {
+            return object.detail
+        }
+        switch mode {
+        case .append:
+            return "Embedded PDF pages are appended to the rendered note PDF when the asset can be opened."
+        case .separate:
+            if exportedPath != nil {
+                return "Embedded PDF was copied as a separate file."
+            }
+            return "Embedded PDF remains linked because no separate export path was produced."
+        case .linkOnly:
+            return "Embedded PDF remains linked and is recorded in sidecar JSON."
         }
     }
 }

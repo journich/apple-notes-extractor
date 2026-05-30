@@ -203,3 +203,13 @@ swift run notes2myicor sync --once --parser-mode native-swift --account "iCloud"
 ```
 
 The native parser currently handles simple gzipped `ZICNOTEDATA.ZDATA` payloads by decoding enough of the Apple Notes protobuf to extract plain note text. It intentionally ignores Apple Notes formatting attribute runs and embedded objects for now, reporting warnings instead of attempting partial rich rendering. Use the default `apple-cloud-notes-parser` mode for full MVP exports.
+
+Stage 15 adds embedded-object classification around parser HTML output:
+
+- local `src`, `href`, and `data` asset references are classified as images, sketches/handwriting, scans, PDFs, audio, video, text, HTML, archives, or unknown files;
+- HTML tables are recorded as rendered inline objects;
+- missing and unsupported embedded objects are surfaced as sidecar warnings;
+- sidecar JSON includes `embedded_pdf_mode` and an `embedded_objects` list;
+- embedded PDF mode defaults to `append`, with `separate` and `link-only` supported in the export layer. Append uses PDFKit when the embedded PDF asset can be opened; separate mode copies embedded PDFs next to the rendered note PDF.
+
+Sketch/handwriting support currently depends on the parser emitting a file reference, usually an image, whose path or filename can be classified from generic drawing/handwriting hints. Real Apple Notes output can represent embedded objects differently across macOS versions, so unsupported objects are intentionally recorded instead of silently dropped.

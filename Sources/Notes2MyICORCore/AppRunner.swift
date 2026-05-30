@@ -140,6 +140,8 @@ public struct AppRunner {
             if let htmlPath {
                 let htmlURL = paths.expandPath(htmlPath).standardizedFileURL
                 let html = try String(contentsOf: htmlURL, encoding: .utf8)
+                let assets = NoteDocumentAssetResolver().resolveAssets(html: html, htmlPath: htmlURL.path)
+                let embeddedObjects = NoteDocumentEmbeddedObjectDetector().detect(html: html, assets: assets)
                 document = NoteDocument(
                     uuid: noteUUID,
                     title: title ?? htmlURL.deletingPathExtension().lastPathComponent,
@@ -149,7 +151,9 @@ public struct AppRunner {
                     modifiedAt: nil,
                     htmlPath: htmlURL.path,
                     htmlContent: html,
-                    assets: NoteDocumentAssetResolver().resolveAssets(html: html, htmlPath: htmlURL.path)
+                    assets: assets,
+                    embeddedObjects: embeddedObjects,
+                    warnings: NoteDocumentEmbeddedObjectDetector().warnings(for: embeddedObjects)
                 )
             } else {
                 let source = notesContainerPath.map { paths.expandPath($0).standardizedFileURL }
@@ -177,7 +181,8 @@ public struct AppRunner {
                     outputDirectory: outputDirectory,
                     mirrorFolderTree: AppConfig.defaultConfig.export.mirrorFolderTree,
                     writeSidecarJSON: AppConfig.defaultConfig.export.writeSidecarJSON,
-                    writeDebugHTML: writeDebugHTML
+                    writeDebugHTML: writeDebugHTML,
+                    embeddedPDFMode: defaultEmbeddedPDFMode()
                 )
             )
             output(NoteExportFormatter().format(result))
@@ -318,7 +323,8 @@ public struct AppRunner {
                 outputDirectory: outputDirectory,
                 mirrorFolderTree: AppConfig.defaultConfig.export.mirrorFolderTree,
                 writeSidecarJSON: AppConfig.defaultConfig.export.writeSidecarJSON,
-                writeDebugHTML: false
+                writeDebugHTML: false,
+                embeddedPDFMode: defaultEmbeddedPDFMode()
             ),
             missingGraceCount: AppConfig.defaultConfig.polling.missingScanGraceCount,
             dryRun: dryRun
@@ -346,6 +352,13 @@ public struct AppRunner {
                 outputDirectory: parserOutputDirectory
             ))
         }
+    }
+
+    private func defaultEmbeddedPDFMode() -> EmbeddedPDFMode {
+        EmbeddedPDFMode(
+            configValue: AppConfig.defaultConfig.export.embeddedPDFMode,
+            appendEmbeddedPDFs: AppConfig.defaultConfig.export.appendEmbeddedPDFs
+        )
     }
 
     private func launchAgentSyncArguments(

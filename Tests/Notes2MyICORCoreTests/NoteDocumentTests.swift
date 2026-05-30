@@ -50,6 +50,79 @@ final class NoteDocumentTests: XCTestCase {
         XCTAssertEqual(assets[0].resolvedPath, "/tmp/parser/notes_rip/html/assets/image 1.png")
     }
 
+    func testAssetPathsDecodePercentEscapesForFilesystemLookup() throws {
+        let resolver = NoteDocumentAssetResolver()
+        let assets = resolver.resolveAssets(
+            html: #"<img src="assets/Apple%20Pencil%20Drawing.png">"#,
+            htmlPath: "/tmp/parser/notes_rip/html/note-uuid.html"
+        )
+
+        XCTAssertEqual(assets.first?.reference, "assets/Apple%20Pencil%20Drawing.png")
+        XCTAssertEqual(assets.first?.resolvedPath, "/tmp/parser/notes_rip/html/assets/Apple Pencil Drawing.png")
+        XCTAssertEqual(assets.first?.kind, .sketchOrHandwriting)
+    }
+
+    func testSketchOrHandwritingAssetMapsToEmbeddedObjectModel() throws {
+        let directory = try TemporaryDirectory()
+        let htmlURL = directory.url.appendingPathComponent("note.html")
+        let assetURL = directory.url.appendingPathComponent("Apple Pencil Drawing.png")
+        try Data("image fixture".utf8).write(to: assetURL)
+        try Data(#"<img src="Apple Pencil Drawing.png">"#.utf8).write(to: htmlURL)
+
+        let html = try String(contentsOf: htmlURL)
+        let assets = NoteDocumentAssetResolver().resolveAssets(html: html, htmlPath: htmlURL.path)
+        let embeddedObjects = NoteDocumentEmbeddedObjectDetector().detect(html: html, assets: assets)
+
+        XCTAssertEqual(assets.first?.kind, .sketchOrHandwriting)
+        XCTAssertEqual(assets.first?.exists, true)
+        XCTAssertEqual(embeddedObjects.first?.kind, .sketchOrHandwriting)
+        XCTAssertEqual(embeddedObjects.first?.status, .renderedInline)
+    }
+
+    func testMissingImageProducesWarning() throws {
+        let directory = try TemporaryDirectory()
+        let htmlURL = directory.url.appendingPathComponent("note.html")
+        let html = #"<img src="missing-image.png">"#
+        try Data(html.utf8).write(to: htmlURL)
+
+        let assets = NoteDocumentAssetResolver().resolveAssets(html: html, htmlPath: htmlURL.path)
+        let embeddedObjects = NoteDocumentEmbeddedObjectDetector().detect(html: html, assets: assets)
+        let warnings = NoteDocumentEmbeddedObjectDetector().warnings(for: embeddedObjects)
+
+        XCTAssertEqual(assets.first?.kind, .image)
+        XCTAssertEqual(assets.first?.exists, false)
+        XCTAssertEqual(embeddedObjects.first?.status, .missing)
+        XCTAssertEqual(warnings, ["Embedded object is referenced but missing from parser output: missing-image.png"])
+    }
+
+    func testTableElementsMapToEmbeddedObjectModel() throws {
+        let html = "<table><tr><td>Cell</td></tr></table>"
+
+        let embeddedObjects = NoteDocumentEmbeddedObjectDetector().detect(html: html, assets: [])
+
+        XCTAssertEqual(embeddedObjects.count, 1)
+        XCTAssertEqual(embeddedObjects[0].kind, .table)
+        XCTAssertEqual(embeddedObjects[0].status, .renderedInline)
+        XCTAssertEqual(embeddedObjects[0].detail, "HTML table elements detected: 1")
+    }
+
+    func testUnsupportedEmbeddedObjectProducesWarning() throws {
+        let directory = try TemporaryDirectory()
+        let htmlURL = directory.url.appendingPathComponent("note.html")
+        let assetURL = directory.url.appendingPathComponent("object.custom")
+        try Data("fixture".utf8).write(to: assetURL)
+        let html = #"<a href="object.custom">Object</a>"#
+        try Data(html.utf8).write(to: htmlURL)
+
+        let assets = NoteDocumentAssetResolver().resolveAssets(html: html, htmlPath: htmlURL.path)
+        let embeddedObjects = NoteDocumentEmbeddedObjectDetector().detect(html: html, assets: assets)
+        let warnings = NoteDocumentEmbeddedObjectDetector().warnings(for: embeddedObjects)
+
+        XCTAssertEqual(embeddedObjects.first?.kind, .unknown)
+        XCTAssertEqual(embeddedObjects.first?.status, .unsupported)
+        XCTAssertEqual(warnings, ["Embedded object has an unsupported or unknown type: object.custom"])
+    }
+
     func testContentHashChangesWhenBodyChanges() throws {
         let first = fixtureDocument(htmlContent: "<p>One</p>")
         let second = fixtureDocument(htmlContent: "<p>Two</p>")
@@ -99,12 +172,15 @@ final class NoteDocumentTests: XCTestCase {
     }
 
     func testBuilderAddsMetadataAndParserWarnings() throws {
+        let directory = try TemporaryDirectory()
+        let htmlURL = directory.url.appendingPathComponent("note-uuid.html")
+        try Data("asset fixture".utf8).write(to: directory.url.appendingPathComponent("asset.png"))
         let parsed = AppleCloudNotesParsedNote(
             uuid: "note-uuid",
             title: "Parser title",
             html: #"<img src="asset.png">"#,
             jsonID: "1",
-            individualHTMLPath: "/tmp/parser/note-uuid.html"
+            individualHTMLPath: htmlURL.path
         )
         let metadata = AppleNotesNoteMetadata(
             objectID: 1,
@@ -131,6 +207,7 @@ final class NoteDocumentTests: XCTestCase {
         XCTAssertEqual(document.accountName, "iCloud")
         XCTAssertEqual(document.folderPath, "Capture")
         XCTAssertEqual(document.assets.map(\.hashKey), ["asset.png"])
+        XCTAssertEqual(document.embeddedObjects.map(\.kind), [.image])
         XCTAssertEqual(document.warnings, [])
     }
 

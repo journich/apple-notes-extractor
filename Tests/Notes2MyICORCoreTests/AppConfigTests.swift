@@ -11,6 +11,7 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(config.paths.notesGroupContainer, "~/Library/Group Containers/group.com.apple.notes")
         XCTAssertEqual(config.polling.intervalSeconds, 300)
         XCTAssertTrue(config.export.writeSidecarJSON)
+        XCTAssertEqual(config.export.embeddedPDFMode, "append")
         XCTAssertEqual(config.parser.mode, "apple-cloud-notes-parser")
     }
 

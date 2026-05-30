@@ -88,6 +88,7 @@ public extension AppConfig {
         public var filenameStrategy: String
         public var renderFormat: String
         public var appendEmbeddedPDFs: Bool
+        public var embeddedPDFMode: String
         public var neverDeleteExportedPDFs: Bool
 
         public init(
@@ -96,6 +97,7 @@ public extension AppConfig {
             filenameStrategy: String = "uuid-title",
             renderFormat: String = "A4",
             appendEmbeddedPDFs: Bool = true,
+            embeddedPDFMode: String = "append",
             neverDeleteExportedPDFs: Bool = true
         ) {
             self.writeSidecarJSON = writeSidecarJSON
@@ -103,6 +105,7 @@ public extension AppConfig {
             self.filenameStrategy = filenameStrategy
             self.renderFormat = renderFormat
             self.appendEmbeddedPDFs = appendEmbeddedPDFs
+            self.embeddedPDFMode = embeddedPDFMode
             self.neverDeleteExportedPDFs = neverDeleteExportedPDFs
         }
     }

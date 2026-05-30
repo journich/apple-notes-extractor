@@ -900,6 +900,32 @@ This stage should be driven by the real test corpus and actual myICOR needs.
 - Unsupported embedded objects are visible in warnings.
 - The app does not silently drop important attachments.
 
+### Stage 15 completion notes
+
+Implemented:
+
+- Added an embedded-object model to `NoteDocument`.
+- Classified parser HTML asset references from `src`, `href`, and `data` attributes.
+- Added generic classifications for images, sketches/handwriting, scanned documents, PDFs, audio, video, text, HTML, archives, tables, and unknown objects.
+- Added warnings for missing parser assets and unsupported/unknown asset types.
+- Added `embedded_pdf_mode` and `embedded_objects` to sidecar JSON.
+- Added embedded PDF modes in the export layer:
+  - `append` appends pages with PDFKit when the linked embedded PDF can be opened;
+  - `separate` copies linked embedded PDFs next to the rendered note PDF;
+  - `link-only` records the embedded PDF in sidecar JSON without copying or appending.
+- Added unit tests for sketch/handwriting classification, missing assets, tables, unsupported objects, embedded PDF sidecar metadata, and separate PDF export.
+
+Remaining limitations:
+
+- Sketch/handwriting support depends on the parser exposing the drawing as a referenced file, commonly an image.
+- Native Swift parser mode still does not decode Apple Notes embedded-object protobuf payloads directly.
+- Real Apple Notes embedded object formats vary; unknown objects are recorded as warnings for later targeted support.
+- Visual regression fixtures are still needed with a synthetic public corpus.
+
+Verification:
+
+- `swift test` passed with 128 tests.
+
 ---
 
 ## Stage 16: Packaging, Privacy, and Release Readiness

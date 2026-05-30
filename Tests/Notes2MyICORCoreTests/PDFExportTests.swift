@@ -50,12 +50,20 @@ final class PDFExportTests: XCTestCase {
     func testSidecarJSONContainsRequiredFields() throws {
         let directory = try TemporaryDirectory()
         let writer = NoteExportWriter()
-        let document = fixtureDocument()
+        let document = fixtureDocument(embeddedObjects: [
+            NoteDocumentEmbeddedObject(
+                kind: .sketchOrHandwriting,
+                reference: "Apple Pencil Drawing.png",
+                resolvedPath: nil,
+                status: .renderedInline,
+                detail: "Sketch fixture"
+            ),
+        ])
 
         let result = try writer.write(
             document: document,
             pdfData: Data("%PDF fixture".utf8),
-            options: NoteExportOptions(outputDirectory: directory.url),
+            options: NoteExportOptions(outputDirectory: directory.url, embeddedPDFMode: .linkOnly),
             exportedAt: Date(timeIntervalSince1970: 10)
         )
 
@@ -70,6 +78,39 @@ final class PDFExportTests: XCTestCase {
         XCTAssertEqual(sidecar.folderPath, "Capture")
         XCTAssertTrue(sidecar.contentHash.hasPrefix("sha256:"))
         XCTAssertEqual(sidecar.pdfPath, result.pdfURL.path)
+        XCTAssertEqual(sidecar.embeddedPDFMode, .linkOnly)
+        XCTAssertEqual(sidecar.embeddedObjects.count, 1)
+        XCTAssertEqual(sidecar.embeddedObjects[0].kind, .sketchOrHandwriting)
+    }
+
+    func testSeparateEmbeddedPDFModeCopiesPDFAssetAndRecordsPath() throws {
+        let directory = try TemporaryDirectory()
+        let assetURL = directory.url.appendingPathComponent("embedded.pdf")
+        try Data("embedded pdf fixture".utf8).write(to: assetURL)
+        let writer = NoteExportWriter()
+        let document = fixtureDocument(embeddedObjects: [
+            NoteDocumentEmbeddedObject(
+                kind: .pdf,
+                reference: "embedded.pdf",
+                resolvedPath: assetURL.path,
+                status: .linked
+            ),
+        ])
+
+        let result = try writer.write(
+            document: document,
+            pdfData: Data("%PDF fixture".utf8),
+            options: NoteExportOptions(outputDirectory: directory.url, embeddedPDFMode: .separate),
+            exportedAt: Date(timeIntervalSince1970: 10)
+        )
+
+        let sidecarURL = try XCTUnwrap(result.sidecarURL)
+        let sidecar = try JSONDecoder.withISO8601Dates.decode(NoteExportSidecar.self, from: Data(contentsOf: sidecarURL))
+        let exportedPath = try XCTUnwrap(sidecar.embeddedObjects.first?.exportedPath)
+
+        XCTAssertEqual(sidecar.embeddedPDFMode, .separate)
+        XCTAssertTrue(exportedPath.hasSuffix("note-uuid - Fixture - embedded-1.pdf"))
+        XCTAssertEqual(try String(contentsOfFile: exportedPath), "embedded pdf fixture")
     }
 
     func testExistingPDFReplacementIsAtomicWherePractical() throws {
@@ -116,7 +157,8 @@ final class PDFExportTests: XCTestCase {
 
     private func fixtureDocument(
         title: String = "Fixture",
-        folderPath: String? = "Capture"
+        folderPath: String? = "Capture",
+        embeddedObjects: [NoteDocumentEmbeddedObject] = []
     ) -> NoteDocument {
         NoteDocument(
             uuid: "note-uuid",
@@ -128,6 +170,7 @@ final class PDFExportTests: XCTestCase {
             htmlPath: nil,
             htmlContent: "<p>Body</p>",
             assets: [],
+            embeddedObjects: embeddedObjects,
             warnings: ["fixture warning"]
         )
     }
