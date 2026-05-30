@@ -649,6 +649,8 @@ Handle notes that disappear, move out of scope, or appear in Recently Deleted wi
 
 ## Stage 12: LaunchAgent and Watch Mode
 
+Status: completed in the initial CLI implementation.
+
 ### Goal
 
 Allow the sync to run automatically on a schedule.
@@ -671,6 +673,25 @@ notes2myicor install-launch-agent
 notes2myicor uninstall-launch-agent
 notes2myicor sync --watch
 ```
+
+Implemented command examples:
+
+```bash
+notes2myicor sync --watch --interval-seconds 300 --account "iCloud" --folder "Capture" --recursive
+notes2myicor install-launch-agent --binary /path/to/notes2myicor --interval-seconds 300 --account "iCloud" --folder "Capture" --recursive
+notes2myicor launch-agent-status
+notes2myicor uninstall-launch-agent
+```
+
+Implementation notes:
+
+- `sync --watch` runs `sync --once` serially and sleeps between runs, avoiding overlapping syncs by construction.
+- `--max-runs` is available for diagnostics and tests.
+- LaunchAgent plist generation writes `StartInterval`, `StandardOutPath`, and `StandardErrorPath`.
+- `install-launch-agent` writes the plist and validates the binary path, but does not call `launchctl`.
+- Use `launchctl bootstrap` and `launchctl bootout` manually when enabling or disabling the plist in a live macOS session.
+- Default LaunchAgent label is `com.journich.notes2myicor`.
+- Default logs are under `~/Library/Logs/Notes2MyICOR`.
 
 ### Unit tests
 

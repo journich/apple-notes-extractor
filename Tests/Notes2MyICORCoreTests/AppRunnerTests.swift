@@ -267,7 +267,97 @@ final class AppRunnerTests: XCTestCase {
             .run(arguments: ["sync"])
 
         XCTAssertEqual(code, 2)
-        XCTAssertTrue(recorder.stderr.contains("Missing required option: --once"))
+        XCTAssertTrue(recorder.stderr.contains("Missing required option: --once or --watch"))
+    }
+
+    func testSyncWatchCanBeLimitedToZeroRuns() throws {
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: ["sync", "--watch", "--interval-seconds", "1", "--max-runs", "0"])
+
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(recorder.stdout.contains("Watch completed: runs=0"))
+    }
+
+    func testInstallLaunchAgentWritesPlist() throws {
+        let directory = try TemporaryDirectory()
+        let binaryURL = directory.url.appendingPathComponent("notes2myicor")
+        let launchAgentsDirectory = directory.url.appendingPathComponent("LaunchAgents", isDirectory: true)
+        let logDirectory = directory.url.appendingPathComponent("Logs", isDirectory: true)
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: binaryURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binaryURL.path)
+
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: [
+                "install-launch-agent",
+                "--label", "com.example.notes2myicor",
+                "--binary", binaryURL.path,
+                "--launch-agents-dir", launchAgentsDirectory.path,
+                "--log-dir", logDirectory.path,
+                "--interval-seconds", "60",
+                "--account", "iCloud",
+                "--folder", "Capture",
+                "--recursive",
+            ])
+
+        let plistURL = launchAgentsDirectory.appendingPathComponent("com.example.notes2myicor.plist")
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: plistURL.path))
+        XCTAssertTrue(recorder.stdout.contains("LaunchAgent installed:"))
+        let data = try Data(contentsOf: plistURL)
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
+        XCTAssertEqual(plist["StartInterval"] as? Int, 60)
+        XCTAssertEqual(plist["StandardOutPath"] as? String, logDirectory.appendingPathComponent("notes2myicor.out.log").path)
+        XCTAssertEqual(plist["ProgramArguments"] as? [String], [
+            binaryURL.path,
+            "sync",
+            "--once",
+            "--account",
+            "iCloud",
+            "--folder",
+            "Capture",
+            "--recursive",
+        ])
+    }
+
+    func testLaunchAgentStatusReportsInstalledState() throws {
+        let directory = try TemporaryDirectory()
+        let launchAgentsDirectory = directory.url.appendingPathComponent("LaunchAgents", isDirectory: true)
+        try FileManager.default.createDirectory(at: launchAgentsDirectory, withIntermediateDirectories: true)
+        try Data("plist".utf8).write(
+            to: launchAgentsDirectory.appendingPathComponent("com.example.notes2myicor.plist")
+        )
+
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: [
+                "launch-agent-status",
+                "--label", "com.example.notes2myicor",
+                "--launch-agents-dir", launchAgentsDirectory.path,
+            ])
+
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(recorder.stdout.contains("INSTALLED: true"))
+    }
+
+    func testUninstallLaunchAgentRemovesPlist() throws {
+        let directory = try TemporaryDirectory()
+        let launchAgentsDirectory = directory.url.appendingPathComponent("LaunchAgents", isDirectory: true)
+        let plistURL = launchAgentsDirectory.appendingPathComponent("com.example.notes2myicor.plist")
+        try FileManager.default.createDirectory(at: launchAgentsDirectory, withIntermediateDirectories: true)
+        try Data("plist".utf8).write(to: plistURL)
+
+        let recorder = OutputRecorder()
+        let code = AppRunner(output: recorder.output, errorOutput: recorder.error)
+            .run(arguments: [
+                "uninstall-launch-agent",
+                "--label", "com.example.notes2myicor",
+                "--launch-agents-dir", launchAgentsDirectory.path,
+            ])
+
+        XCTAssertEqual(code, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: plistURL.path))
     }
 }
 

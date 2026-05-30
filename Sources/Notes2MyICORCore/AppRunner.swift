@@ -4,6 +4,7 @@ public struct AppRunner {
     public let fileManager: FileManager
     public let environment: [String: String]
     public let pdfRenderer: PDFRendering
+    public let sleep: @Sendable (TimeInterval) -> Void
     public let output: @Sendable (String) -> Void
     public let errorOutput: @Sendable (String) -> Void
 
@@ -11,12 +12,14 @@ public struct AppRunner {
         fileManager: FileManager = .default,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         pdfRenderer: PDFRendering = WebKitPDFRenderer(),
+        sleep: @escaping @Sendable (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
         output: @escaping @Sendable (String) -> Void = { print($0) },
         errorOutput: @escaping @Sendable (String) -> Void = { FileHandle.standardError.write(Data(($0 + "\n").utf8)) }
     ) {
         self.fileManager = fileManager
         self.environment = environment
         self.pdfRenderer = pdfRenderer
+        self.sleep = sleep
         self.output = output
         self.errorOutput = errorOutput
     }
@@ -176,43 +179,196 @@ public struct AppRunner {
             )
             output(NoteExportFormatter().format(result))
         case .syncOnce(let dryRun, let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let stateDatabasePath):
-            let paths = AppPaths(fileManager: fileManager, environment: environment)
-            let notesContainer = notesContainerPath.map { paths.expandPath($0).standardizedFileURL }
-                ?? AppleNotesPaths(paths: paths).groupContainerURL
-            let parserOutputDirectory = paths.expandPath(parserOutputDirectoryPath ?? "~/Library/Application Support/Notes2MyICOR/acnp-output").standardizedFileURL
-            let outputDirectory = paths.expandPath(outputDirectoryPath ?? AppConfig.defaultConfig.paths.outputDirectory).standardizedFileURL
-            let stateURL = paths.expandPath(stateDatabasePath ?? AppConfig.defaultConfig.paths.stateDatabase).standardizedFileURL
-            let stateDatabase = try StateDatabase.open(at: stateURL)
-            let parser = AppleCloudNotesParser(config: AppleCloudNotesParserConfig(
-                rubyExecutablePath: rubyPath ?? "/opt/homebrew/opt/ruby/bin/ruby",
-                parserScriptPath: parserScriptPath ?? "../apple_cloud_notes_parser/notes_cloud_ripper.rb",
-                outputDirectory: parserOutputDirectory
-            ))
-            let engine = SyncEngine(
-                stateDatabase: stateDatabase,
-                parser: parser,
-                exporter: NoteExporter(pdfRenderer: pdfRenderer)
+            let summary = try runSyncOnce(
+                dryRun: dryRun,
+                accountName: accountName,
+                folderPath: folderPath,
+                recursive: recursive,
+                databasePath: databasePath,
+                notesContainerPath: notesContainerPath,
+                parserScriptPath: parserScriptPath,
+                rubyPath: rubyPath,
+                parserOutputDirectoryPath: parserOutputDirectoryPath,
+                outputDirectoryPath: outputDirectoryPath,
+                stateDatabasePath: stateDatabasePath
             )
-            let summary = try engine.syncOnce(SyncRequest(
-                databaseURL: appleNotesDatabaseURL(databasePath: databasePath, notesContainerPath: notesContainer.path),
-                notesContainerURL: notesContainer,
-                scopeRequest: AppleNotesScopeRequest(
-                    accountName: accountName ?? AppConfig.defaultConfig.scope.accountName,
-                    folderPath: folderPath ?? AppConfig.defaultConfig.scope.folderPath,
-                    recursive: recursive ?? AppConfig.defaultConfig.scope.recursive
-                ),
-                parserOutputDirectory: parserOutputDirectory,
-                exportOptions: NoteExportOptions(
-                    outputDirectory: outputDirectory,
-                    mirrorFolderTree: AppConfig.defaultConfig.export.mirrorFolderTree,
-                    writeSidecarJSON: AppConfig.defaultConfig.export.writeSidecarJSON,
-                    writeDebugHTML: false
-                ),
-                missingGraceCount: AppConfig.defaultConfig.polling.missingScanGraceCount,
-                dryRun: dryRun
-            ))
             output(SyncSummaryFormatter().format(summary))
+        case .syncWatch(let dryRun, let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let stateDatabasePath, let intervalSeconds, let maxRuns):
+            var completedRuns = 0
+            while maxRuns == nil || completedRuns < (maxRuns ?? 0) {
+                let summary = try runSyncOnce(
+                    dryRun: dryRun,
+                    accountName: accountName,
+                    folderPath: folderPath,
+                    recursive: recursive,
+                    databasePath: databasePath,
+                    notesContainerPath: notesContainerPath,
+                    parserScriptPath: parserScriptPath,
+                    rubyPath: rubyPath,
+                    parserOutputDirectoryPath: parserOutputDirectoryPath,
+                    outputDirectoryPath: outputDirectoryPath,
+                    stateDatabasePath: stateDatabasePath
+                )
+                completedRuns += 1
+                output(SyncSummaryFormatter().format(summary))
+                if maxRuns == nil || completedRuns < (maxRuns ?? 0) {
+                    sleep(TimeInterval(intervalSeconds))
+                }
+            }
+            if maxRuns != nil {
+                output("Watch completed: runs=\(completedRuns)")
+            }
+        case .installLaunchAgent(let label, let binaryPath, let launchAgentsDirectoryPath, let logDirectoryPath, let intervalSeconds, let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let stateDatabasePath):
+            let paths = AppPaths(fileManager: fileManager, environment: environment)
+            let config = LaunchAgentConfig(
+                label: label,
+                executableURL: binaryPath.map { paths.expandPath($0).standardizedFileURL } ?? defaultExecutableURL(),
+                syncArguments: launchAgentSyncArguments(
+                    accountName: accountName,
+                    folderPath: folderPath,
+                    recursive: recursive,
+                    databasePath: databasePath,
+                    notesContainerPath: notesContainerPath,
+                    parserScriptPath: parserScriptPath,
+                    rubyPath: rubyPath,
+                    parserOutputDirectoryPath: parserOutputDirectoryPath,
+                    outputDirectoryPath: outputDirectoryPath,
+                    stateDatabasePath: stateDatabasePath
+                ),
+                intervalSeconds: intervalSeconds,
+                standardOutURL: launchAgentLogURL(
+                    logDirectoryPath: logDirectoryPath,
+                    fileName: LaunchAgentDefaults.standardOutFileName
+                ),
+                standardErrorURL: launchAgentLogURL(
+                    logDirectoryPath: logDirectoryPath,
+                    fileName: LaunchAgentDefaults.standardErrorFileName
+                )
+            )
+            let plistURL = try LaunchAgentManager(fileManager: fileManager).install(
+                config,
+                launchAgentsDirectory: launchAgentsDirectory(launchAgentsDirectoryPath)
+            )
+            output(LaunchAgentFormatter().formatInstalled(plistURL: plistURL))
+        case .uninstallLaunchAgent(let label, let launchAgentsDirectoryPath):
+            let plistURL = try LaunchAgentManager(fileManager: fileManager).uninstall(
+                label: label,
+                launchAgentsDirectory: launchAgentsDirectory(launchAgentsDirectoryPath)
+            )
+            output(LaunchAgentFormatter().formatUninstalled(plistURL: plistURL))
+        case .launchAgentStatus(let label, let launchAgentsDirectoryPath):
+            let status = try LaunchAgentManager(fileManager: fileManager).status(
+                label: label,
+                launchAgentsDirectory: launchAgentsDirectory(launchAgentsDirectoryPath)
+            )
+            output(LaunchAgentFormatter().formatStatus(status))
         }
+    }
+
+    private func runSyncOnce(
+        dryRun: Bool,
+        accountName: String?,
+        folderPath: String?,
+        recursive: Bool?,
+        databasePath: String?,
+        notesContainerPath: String?,
+        parserScriptPath: String?,
+        rubyPath: String?,
+        parserOutputDirectoryPath: String?,
+        outputDirectoryPath: String?,
+        stateDatabasePath: String?
+    ) throws -> SyncSummary {
+        let paths = AppPaths(fileManager: fileManager, environment: environment)
+        let notesContainer = notesContainerPath.map { paths.expandPath($0).standardizedFileURL }
+            ?? AppleNotesPaths(paths: paths).groupContainerURL
+        let parserOutputDirectory = paths.expandPath(parserOutputDirectoryPath ?? "~/Library/Application Support/Notes2MyICOR/acnp-output").standardizedFileURL
+        let outputDirectory = paths.expandPath(outputDirectoryPath ?? AppConfig.defaultConfig.paths.outputDirectory).standardizedFileURL
+        let stateURL = paths.expandPath(stateDatabasePath ?? AppConfig.defaultConfig.paths.stateDatabase).standardizedFileURL
+        let stateDatabase = try StateDatabase.open(at: stateURL)
+        let parser = AppleCloudNotesParser(config: AppleCloudNotesParserConfig(
+            rubyExecutablePath: rubyPath ?? "/opt/homebrew/opt/ruby/bin/ruby",
+            parserScriptPath: parserScriptPath ?? "../apple_cloud_notes_parser/notes_cloud_ripper.rb",
+            outputDirectory: parserOutputDirectory
+        ))
+        let engine = SyncEngine(
+            stateDatabase: stateDatabase,
+            parser: parser,
+            exporter: NoteExporter(pdfRenderer: pdfRenderer)
+        )
+        return try engine.syncOnce(SyncRequest(
+            databaseURL: appleNotesDatabaseURL(databasePath: databasePath, notesContainerPath: notesContainer.path),
+            notesContainerURL: notesContainer,
+            scopeRequest: AppleNotesScopeRequest(
+                accountName: accountName ?? AppConfig.defaultConfig.scope.accountName,
+                folderPath: folderPath ?? AppConfig.defaultConfig.scope.folderPath,
+                recursive: recursive ?? AppConfig.defaultConfig.scope.recursive
+            ),
+            parserOutputDirectory: parserOutputDirectory,
+            exportOptions: NoteExportOptions(
+                outputDirectory: outputDirectory,
+                mirrorFolderTree: AppConfig.defaultConfig.export.mirrorFolderTree,
+                writeSidecarJSON: AppConfig.defaultConfig.export.writeSidecarJSON,
+                writeDebugHTML: false
+            ),
+            missingGraceCount: AppConfig.defaultConfig.polling.missingScanGraceCount,
+            dryRun: dryRun
+        ))
+    }
+
+    private func launchAgentSyncArguments(
+        accountName: String?,
+        folderPath: String?,
+        recursive: Bool?,
+        databasePath: String?,
+        notesContainerPath: String?,
+        parserScriptPath: String?,
+        rubyPath: String?,
+        parserOutputDirectoryPath: String?,
+        outputDirectoryPath: String?,
+        stateDatabasePath: String?
+    ) -> [String] {
+        var arguments = ["sync", "--once"]
+        appendOption("--account", accountName, to: &arguments)
+        appendOption("--folder", folderPath, to: &arguments)
+        if recursive == true {
+            arguments.append("--recursive")
+        }
+        appendOption("--database", databasePath, to: &arguments)
+        appendOption("--notes-container", notesContainerPath, to: &arguments)
+        appendOption("--parser-script", parserScriptPath, to: &arguments)
+        appendOption("--ruby", rubyPath, to: &arguments)
+        appendOption("--parser-output-dir", parserOutputDirectoryPath, to: &arguments)
+        appendOption("--output-dir", outputDirectoryPath, to: &arguments)
+        appendOption("--state-db", stateDatabasePath, to: &arguments)
+        return arguments
+    }
+
+    private func appendOption(_ name: String, _ value: String?, to arguments: inout [String]) {
+        guard let value else {
+            return
+        }
+        arguments.append(name)
+        arguments.append(value)
+    }
+
+    private func defaultExecutableURL() -> URL {
+        if let executableURL = Bundle.main.executableURL {
+            return executableURL.standardizedFileURL
+        }
+        return URL(fileURLWithPath: CommandLine.arguments.first ?? "notes2myicor").standardizedFileURL
+    }
+
+    private func launchAgentsDirectory(_ path: String?) -> URL {
+        let paths = AppPaths(fileManager: fileManager, environment: environment)
+        return paths.expandPath(path ?? "~/Library/LaunchAgents").standardizedFileURL
+    }
+
+    private func launchAgentLogURL(logDirectoryPath: String?, fileName: String) -> URL {
+        let paths = AppPaths(fileManager: fileManager, environment: environment)
+        return paths
+            .expandPath(logDirectoryPath ?? AppConfig.defaultConfig.paths.logDirectory)
+            .appendingPathComponent(fileName)
+            .standardizedFileURL
     }
 
     private func readInventory(databasePath: String?, notesContainerPath: String?) throws -> AppleNotesInventory {
@@ -263,13 +419,21 @@ public extension AppRunner {
       notes2myicor parse [--note-uuid <uuid>] [--notes-container <path>] [--parser-script <path>] [--ruby <path>] [--output-dir <path>] [--debug-html-dir <path>]
       notes2myicor export --note-uuid <uuid> [--html <path>] [--title <title>] [--output-dir <path>] [--debug-html]
       notes2myicor sync --once [--dry-run] [--account <name>] [--folder <path>] [--recursive]
+      notes2myicor sync --watch [--interval-seconds <seconds>] [--account <name>] [--folder <path>] [--recursive]
+      notes2myicor install-launch-agent [--binary <path>] [--interval-seconds <seconds>] [--account <name>] [--folder <path>] [--recursive]
+      notes2myicor uninstall-launch-agent [--label <label>]
+      notes2myicor launch-agent-status [--label <label>]
 
     Commands:
       accounts         List Apple Notes accounts.
       export           Render one note document to PDF with sidecar JSON.
       folders          List Apple Notes folders.
       init             Create a default JSON config file.
+      install-launch-agent
+                       Write a LaunchAgent plist for scheduled sync.
       inspect-schema   Inspect the local Apple Notes SQLite schema read-only.
+      launch-agent-status
+                       Print whether the LaunchAgent plist is installed.
       notes            List Apple Notes note metadata.
       parse            Run Apple Cloud Notes Parser and decode its JSON output.
       reset-state      Remove one note from the local app state database.
@@ -278,15 +442,23 @@ public extension AppRunner {
       snapshot         Copy the Apple Notes store and asset folders into a work snapshot.
       sync             Run one full scan, parse, and export pass.
       status           Print local app state database status.
+      uninstall-launch-agent
+                       Remove the LaunchAgent plist.
       version          Print the application version.
 
     Options:
       --account           Apple Notes account name.
+      --binary            Absolute executable path to write into the LaunchAgent plist.
       --config            Config file path. Defaults to ~/Library/Application Support/Notes2MyICOR/config.json.
       --database          SQLite database path for schema inspection.
       --debug-html-dir    Directory for rendered debug HTML output.
       --folder            Apple Notes folder path.
       --html              HTML file path for fixture or debug export input.
+      --interval-seconds  Poll interval for sync --watch or LaunchAgent StartInterval.
+      --label             LaunchAgent label. Defaults to com.journich.notes2myicor.
+      --launch-agents-dir LaunchAgent plist directory. Defaults to ~/Library/LaunchAgents.
+      --log-dir           LaunchAgent stdout/stderr log directory. Defaults to ~/Library/Logs/Notes2MyICOR.
+      --max-runs          Stop sync --watch after this many runs. Intended for tests and diagnostics.
       --notes-container   Apple Notes group container path. Defaults to ~/Library/Group Containers/group.com.apple.notes.
       --note-uuid         Apple Notes note UUID.
       --output-dir        Parser output directory.
@@ -320,6 +492,10 @@ public enum CLICommand: Equatable, Sendable {
     case parse(noteUUID: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, outputDirectoryPath: String?, debugHTMLDirectoryPath: String?)
     case export(noteUUID: String, title: String?, htmlPath: String?, accountName: String?, folderPath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, writeDebugHTML: Bool)
     case syncOnce(dryRun: Bool, accountName: String?, folderPath: String?, recursive: Bool?, databasePath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, stateDatabasePath: String?)
+    case syncWatch(dryRun: Bool, accountName: String?, folderPath: String?, recursive: Bool?, databasePath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, stateDatabasePath: String?, intervalSeconds: Int, maxRuns: Int?)
+    case installLaunchAgent(label: String, binaryPath: String?, launchAgentsDirectoryPath: String?, logDirectoryPath: String?, intervalSeconds: Int, accountName: String?, folderPath: String?, recursive: Bool?, databasePath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, stateDatabasePath: String?)
+    case uninstallLaunchAgent(label: String, launchAgentsDirectoryPath: String?)
+    case launchAgentStatus(label: String, launchAgentsDirectoryPath: String?)
 
     public static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let first = arguments.first else {
@@ -423,11 +599,49 @@ public enum CLICommand: Equatable, Sendable {
             )
         case "sync":
             let options = try parseSyncOptions(Array(arguments.dropFirst()))
-            guard options.once else {
-                throw CLIError.usage("Missing required option: --once")
+            if options.once, options.watch {
+                throw CLIError.usage("Use only one of --once or --watch")
             }
-            return .syncOnce(
-                dryRun: options.dryRun,
+            if options.watch {
+                return .syncWatch(
+                    dryRun: options.dryRun,
+                    accountName: options.accountName,
+                    folderPath: options.folderPath,
+                    recursive: options.recursive,
+                    databasePath: options.databasePath,
+                    notesContainerPath: options.notesContainerPath,
+                    parserScriptPath: options.parserScriptPath,
+                    rubyPath: options.rubyPath,
+                    parserOutputDirectoryPath: options.parserOutputDirectoryPath,
+                    outputDirectoryPath: options.outputDirectoryPath,
+                    stateDatabasePath: options.stateDatabasePath,
+                    intervalSeconds: options.intervalSeconds ?? AppConfig.defaultConfig.polling.intervalSeconds,
+                    maxRuns: options.maxRuns
+                )
+            } else if options.once {
+                return .syncOnce(
+                    dryRun: options.dryRun,
+                    accountName: options.accountName,
+                    folderPath: options.folderPath,
+                    recursive: options.recursive,
+                    databasePath: options.databasePath,
+                    notesContainerPath: options.notesContainerPath,
+                    parserScriptPath: options.parserScriptPath,
+                    rubyPath: options.rubyPath,
+                    parserOutputDirectoryPath: options.parserOutputDirectoryPath,
+                    outputDirectoryPath: options.outputDirectoryPath,
+                    stateDatabasePath: options.stateDatabasePath
+                )
+            }
+            throw CLIError.usage("Missing required option: --once or --watch")
+        case "install-launch-agent":
+            let options = try parseLaunchAgentInstallOptions(Array(arguments.dropFirst()))
+            return .installLaunchAgent(
+                label: options.label,
+                binaryPath: options.binaryPath,
+                launchAgentsDirectoryPath: options.launchAgentsDirectoryPath,
+                logDirectoryPath: options.logDirectoryPath,
+                intervalSeconds: options.intervalSeconds,
                 accountName: options.accountName,
                 folderPath: options.folderPath,
                 recursive: options.recursive,
@@ -438,6 +652,18 @@ public enum CLICommand: Equatable, Sendable {
                 parserOutputDirectoryPath: options.parserOutputDirectoryPath,
                 outputDirectoryPath: options.outputDirectoryPath,
                 stateDatabasePath: options.stateDatabasePath
+            )
+        case "uninstall-launch-agent":
+            let options = try parseLaunchAgentBasicOptions(Array(arguments.dropFirst()))
+            return .uninstallLaunchAgent(
+                label: options.label,
+                launchAgentsDirectoryPath: options.launchAgentsDirectoryPath
+            )
+        case "launch-agent-status":
+            let options = try parseLaunchAgentBasicOptions(Array(arguments.dropFirst()))
+            return .launchAgentStatus(
+                label: options.label,
+                launchAgentsDirectoryPath: options.launchAgentsDirectoryPath
             )
         default:
             throw CLIError.usage("Unknown command: \(first)")
@@ -647,8 +873,60 @@ public enum CLICommand: Equatable, Sendable {
             switch argument {
             case "--once":
                 options.once = true
+            case "--watch":
+                options.watch = true
             case "--dry-run":
                 options.dryRun = true
+            case "--account":
+                options.accountName = try requireValue(iterator.next(), for: argument)
+            case "--folder":
+                options.folderPath = try requireValue(iterator.next(), for: argument)
+            case "--recursive":
+                options.recursive = true
+            case "--database":
+                options.databasePath = try requireValue(iterator.next(), for: argument)
+            case "--notes-container":
+                options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-script":
+                options.parserScriptPath = try requireValue(iterator.next(), for: argument)
+            case "--ruby":
+                options.rubyPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-output-dir":
+                options.parserOutputDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--output-dir":
+                options.outputDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--state-db":
+                options.stateDatabasePath = try requireValue(iterator.next(), for: argument)
+            case "--interval-seconds":
+                options.intervalSeconds = try requirePositiveInt(iterator.next(), for: argument)
+            case "--max-runs":
+                options.maxRuns = try requireNonNegativeInt(iterator.next(), for: argument)
+            case "--help", "-h":
+                throw CLIError.usage(AppRunner.helpText)
+            default:
+                throw CLIError.usage("Unknown option: \(argument)")
+            }
+        }
+
+        return options
+    }
+
+    private static func parseLaunchAgentInstallOptions(_ arguments: [String]) throws -> LaunchAgentInstallOptions {
+        var options = LaunchAgentInstallOptions()
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            switch argument {
+            case "--label":
+                options.label = try requireValue(iterator.next(), for: argument)
+            case "--binary":
+                options.binaryPath = try requireValue(iterator.next(), for: argument)
+            case "--launch-agents-dir":
+                options.launchAgentsDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--log-dir":
+                options.logDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--interval-seconds":
+                options.intervalSeconds = try requirePositiveInt(iterator.next(), for: argument)
             case "--account":
                 options.accountName = try requireValue(iterator.next(), for: argument)
             case "--folder":
@@ -672,7 +950,27 @@ public enum CLICommand: Equatable, Sendable {
             case "--help", "-h":
                 throw CLIError.usage(AppRunner.helpText)
             default:
-                throw CLIError.usage("Unknown option: \(argument)")
+                throw CLIError.usage("Unknown install-launch-agent option: \(argument)")
+            }
+        }
+
+        return options
+    }
+
+    private static func parseLaunchAgentBasicOptions(_ arguments: [String]) throws -> LaunchAgentBasicOptions {
+        var options = LaunchAgentBasicOptions()
+        var iterator = arguments.makeIterator()
+
+        while let argument = iterator.next() {
+            switch argument {
+            case "--label":
+                options.label = try requireValue(iterator.next(), for: argument)
+            case "--launch-agents-dir":
+                options.launchAgentsDirectoryPath = try requireValue(iterator.next(), for: argument)
+            case "--help", "-h":
+                throw CLIError.usage(AppRunner.helpText)
+            default:
+                throw CLIError.usage("Unknown LaunchAgent option: \(argument)")
             }
         }
 
@@ -690,6 +988,22 @@ public enum CLICommand: Equatable, Sendable {
             throw CLIError.usage("Missing value for \(argument)")
         }
         return value
+    }
+
+    private static func requirePositiveInt(_ value: String?, for argument: String) throws -> Int {
+        let parsed = try requireNonNegativeInt(value, for: argument)
+        guard parsed > 0 else {
+            throw CLIError.usage("Value for \(argument) must be greater than zero")
+        }
+        return parsed
+    }
+
+    private static func requireNonNegativeInt(_ value: String?, for argument: String) throws -> Int {
+        let raw = try requireValue(value, for: argument)
+        guard let parsed = Int(raw), parsed >= 0 else {
+            throw CLIError.usage("Value for \(argument) must be a non-negative integer")
+        }
+        return parsed
     }
 }
 
@@ -737,6 +1051,7 @@ private struct ExportOptions {
 
 private struct SyncOptions {
     var once = false
+    var watch = false
     var dryRun = false
     var accountName: String?
     var folderPath: String?
@@ -748,6 +1063,31 @@ private struct SyncOptions {
     var parserOutputDirectoryPath: String?
     var outputDirectoryPath: String?
     var stateDatabasePath: String?
+    var intervalSeconds: Int?
+    var maxRuns: Int?
+}
+
+private struct LaunchAgentInstallOptions {
+    var label = LaunchAgentDefaults.label
+    var binaryPath: String?
+    var launchAgentsDirectoryPath: String?
+    var logDirectoryPath: String?
+    var intervalSeconds = AppConfig.defaultConfig.polling.intervalSeconds
+    var accountName: String?
+    var folderPath: String?
+    var recursive: Bool?
+    var databasePath: String?
+    var notesContainerPath: String?
+    var parserScriptPath: String?
+    var rubyPath: String?
+    var parserOutputDirectoryPath: String?
+    var outputDirectoryPath: String?
+    var stateDatabasePath: String?
+}
+
+private struct LaunchAgentBasicOptions {
+    var label = LaunchAgentDefaults.label
+    var launchAgentsDirectoryPath: String?
 }
 
 private enum InventoryOption: Hashable {

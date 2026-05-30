@@ -49,17 +49,20 @@ public extension AppConfig {
         public var outputDirectory: String
         public var stateDatabase: String
         public var workDirectory: String
+        public var logDirectory: String
 
         public init(
             notesGroupContainer: String = "~/Library/Group Containers/group.com.apple.notes",
             outputDirectory: String = "~/Notes2MyICOR/Apple Notes",
             stateDatabase: String = "~/Library/Application Support/Notes2MyICOR/state.sqlite",
-            workDirectory: String = "~/Library/Application Support/Notes2MyICOR/work"
+            workDirectory: String = "~/Library/Application Support/Notes2MyICOR/work",
+            logDirectory: String = "~/Library/Logs/Notes2MyICOR"
         ) {
             self.notesGroupContainer = notesGroupContainer
             self.outputDirectory = outputDirectory
             self.stateDatabase = stateDatabase
             self.workDirectory = workDirectory
+            self.logDirectory = logDirectory
         }
     }
 

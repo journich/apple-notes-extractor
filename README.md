@@ -35,6 +35,10 @@ swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_c
 swift run notes2myicor export --note-uuid <uuid> --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
 swift run notes2myicor sync --once --account "iCloud" --folder "Capture" --recursive --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
 swift run notes2myicor sync --once --dry-run --account "iCloud" --folder "Capture" --recursive
+swift run notes2myicor sync --watch --interval-seconds 300 --account "iCloud" --folder "Capture" --recursive
+swift run notes2myicor install-launch-agent --binary /path/to/notes2myicor --interval-seconds 300 --account "iCloud" --folder "Capture" --recursive
+swift run notes2myicor launch-agent-status
+swift run notes2myicor uninstall-launch-agent
 ```
 
 `notes2myicor init` creates a default JSON config at:
@@ -166,3 +170,14 @@ Stage 11 adds conservative deletion and out-of-scope handling. The default polic
 - notes moved outside the selected folder are marked out of scope, not deleted;
 - notes detected in a `Recently Deleted` folder are marked soft-deleted in state;
 - exported PDFs and sidecar JSON are preserved in place.
+
+Stage 12 adds scheduled operation support:
+
+```bash
+swift run notes2myicor sync --watch --interval-seconds 300 --account "iCloud" --folder "Capture" --recursive
+swift run notes2myicor install-launch-agent --binary /path/to/notes2myicor --interval-seconds 300 --account "iCloud" --folder "Capture" --recursive
+swift run notes2myicor launch-agent-status
+swift run notes2myicor uninstall-launch-agent
+```
+
+`sync --watch` runs `sync --once` serially and sleeps between runs, so it does not start a new sync while a previous sync is still running. `install-launch-agent` writes a LaunchAgent plist, defaulting to `~/Library/LaunchAgents/com.journich.notes2myicor.plist`, with logs under `~/Library/Logs/Notes2MyICOR`. Use `--binary` with an installed absolute executable path; relative, missing, non-executable, or directory paths are refused. The command writes the plist only; load or unload it with `launchctl` when you are ready to enable or disable scheduled background execution in your macOS session.
