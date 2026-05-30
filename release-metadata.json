@@ -1,0 +1,13 @@
+{
+  "name" : "notes2myicor",
+  "repository" : "https://github.com/journich/apple-notes-extractor",
+  "version" : "0.1.0-dev",
+  "minimum_macos" : "11.0",
+  "swift_tools_version" : "6.3",
+  "recommended_install_dir" : "~/bin",
+  "binary_name" : "notes2myicor",
+  "launch_agent_label" : "com.journich.notes2myicor",
+  "release_artifacts" : [
+    "notes2myicor"
+  ]
+}

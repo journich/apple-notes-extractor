@@ -1,0 +1,33 @@
+{
+  "export" : {
+    "appendEmbeddedPDFs" : true,
+    "embeddedPDFMode" : "append",
+    "filenameStrategy" : "uuid-title",
+    "mirrorFolderTree" : true,
+    "neverDeleteExportedPDFs" : true,
+    "renderFormat" : "A4",
+    "writeSidecarJSON" : true
+  },
+  "parser" : {
+    "appleCloudNotesParserPath" : null,
+    "mode" : "apple-cloud-notes-parser"
+  },
+  "paths" : {
+    "logDirectory" : "~/Library/Logs/Notes2MyICOR",
+    "notesGroupContainer" : "~/Library/Group Containers/group.com.apple.notes",
+    "outputDirectory" : "~/Notes2MyICOR/Apple Notes",
+    "stateDatabase" : "~/Library/Application Support/Notes2MyICOR/state.sqlite",
+    "workDirectory" : "~/Library/Application Support/Notes2MyICOR/work"
+  },
+  "polling" : {
+    "fullInventoryEveryRuns" : 12,
+    "intervalSeconds" : 300,
+    "missingScanGraceCount" : 3
+  },
+  "scope" : {
+    "accountName" : "iCloud",
+    "folderPath" : "/",
+    "includeRecentlyDeleted" : false,
+    "recursive" : true
+  }
+}

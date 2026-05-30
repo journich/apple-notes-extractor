@@ -967,6 +967,27 @@ Make the tool usable outside a development checkout.
 - Privacy and licensing obligations are documented.
 - The tool is ready for regular personal use.
 
+### Stage 16 completion notes
+
+Implemented:
+
+- Added `scripts/build-release.sh` for release builds and personal binary installation.
+- Added public-safe `examples/config.example.json`.
+- Added `docs/install.md` with Xcode, Full Disk Access, install path, first-run, and LaunchAgent guidance.
+- Added `docs/privacy.md` covering local-only behavior and files that must never be committed.
+- Added `docs/troubleshooting.md` for permissions, parser setup, Ruby, LaunchAgent, embedded objects, and git hygiene.
+- Added `docs/release-checklist.md`.
+- Added `THIRD_PARTY_NOTICES.md` for Apple Cloud Notes Parser.
+- Added `release-metadata.json`.
+- Added tests for example config parsing, third-party notices, release metadata, and release script presence.
+
+Verification:
+
+- `swift test` passed with 132 tests.
+- `swift build -c release` passed.
+- `scripts/build-release.sh` installed a release binary to a temporary directory.
+- Installed binary `--help` ran from the temporary install location.
+
 ---
 
 ## Suggested Order of Completion

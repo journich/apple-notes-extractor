@@ -10,6 +10,12 @@ The project is intentionally CLI-first. The first implementation stages establis
 swift build
 ```
 
+For a release-style local install:
+
+```bash
+./scripts/build-release.sh "$HOME/bin"
+```
+
 ## Test
 
 ```bash
@@ -50,6 +56,15 @@ swift run notes2myicor uninstall-launch-agent
 ```
 
 The generated config is local runtime state and is ignored by Git.
+
+Packaging and operating docs:
+
+- [Install guide](docs/install.md)
+- [Privacy notes](docs/privacy.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Release checklist](docs/release-checklist.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
+- [Example config](examples/config.example.json)
 
 ## Implemented Stages
 
@@ -213,3 +228,11 @@ Stage 15 adds embedded-object classification around parser HTML output:
 - embedded PDF mode defaults to `append`, with `separate` and `link-only` supported in the export layer. Append uses PDFKit when the embedded PDF asset can be opened; separate mode copies embedded PDFs next to the rendered note PDF.
 
 Sketch/handwriting support currently depends on the parser emitting a file reference, usually an image, whose path or filename can be classified from generic drawing/handwriting hints. Real Apple Notes output can represent embedded objects differently across macOS versions, so unsupported objects are intentionally recorded instead of silently dropped.
+
+Stage 16 adds release-readiness artifacts:
+
+- release build/install script at `scripts/build-release.sh`;
+- public-safe example config at `examples/config.example.json`;
+- install, privacy, troubleshooting, and release checklist docs;
+- third-party notice for Apple Cloud Notes Parser;
+- release metadata in `release-metadata.json`.

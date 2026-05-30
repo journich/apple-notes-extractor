@@ -16,6 +16,7 @@ let package = Package(
         .target(
             name: "Notes2MyICORCore",
             linkerSettings: [
+                .linkedFramework("PDFKit"),
                 .linkedFramework("WebKit"),
                 .linkedLibrary("sqlite3"),
                 .linkedLibrary("z"),
