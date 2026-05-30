@@ -800,6 +800,8 @@ No real note titles, note bodies, sidecar JSON, parser output, state databases, 
 
 ## Stage 14: Native Swift Parser Proof of Concept
 
+Status: completed as a narrow proof of concept.
+
 ### Goal
 
 Begin replacing Apple Cloud Notes Parser for simple notes by decoding `ZICNOTEDATA.ZDATA` natively in Swift.
@@ -836,6 +838,22 @@ This is not required for the MVP, but it is the path toward a self-contained app
 
 - Simple text notes can be parsed without Apple Cloud Notes Parser.
 - Complex notes remain safely handled by the existing parser path or clear unsupported warnings.
+
+### Implementation notes
+
+- `--parser-mode native-swift` selects the native proof-of-concept parser.
+- The native parser opens the Apple Notes SQLite database read-only and reads `ZICNOTEDATA.ZDATA`.
+- Gzipped payloads are decompressed with zlib.
+- A small protobuf wire decoder extracts `NoteStoreProto.document.note.note_text`.
+- Attribute runs and embedded objects are not rendered yet; warnings are emitted instead.
+- The default `apple-cloud-notes-parser` mode remains the full MVP parser path.
+
+Example commands:
+
+```bash
+notes2myicor parse --parser-mode native-swift --note-uuid <uuid>
+notes2myicor sync --once --parser-mode native-swift --account "iCloud" --folder /
+```
 
 ---
 

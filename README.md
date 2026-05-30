@@ -31,6 +31,7 @@ swift run notes2myicor status
 swift run notes2myicor scan --account "iCloud" --folder "Capture" --recursive
 swift run notes2myicor snapshot
 swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb
+swift run notes2myicor parse --parser-mode native-swift --note-uuid <uuid>
 swift run notes2myicor parse --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --debug-html-dir /tmp/notes2myicor-debug-html
 swift run notes2myicor export --note-uuid <uuid> --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
 swift run notes2myicor sync --once --account "iCloud" --folder "Capture" --recursive --parser-script ../apple_cloud_notes_parser/notes_cloud_ripper.rb --output-dir /tmp/notes2myicor-export
@@ -193,3 +194,12 @@ swift run notes2myicor sync --once --account "iCloud" --folder / --parser-script
 ```
 
 Real export output contains private note content. Keep generated PDFs, sidecar JSON, parser output, state databases, logs, and snapshots local and untracked.
+
+Stage 14 adds a native Swift parser proof of concept:
+
+```bash
+swift run notes2myicor parse --parser-mode native-swift --note-uuid <uuid>
+swift run notes2myicor sync --once --parser-mode native-swift --account "iCloud" --folder / --output-dir /tmp/notes2myicor-native-export
+```
+
+The native parser currently handles simple gzipped `ZICNOTEDATA.ZDATA` payloads by decoding enough of the Apple Notes protobuf to extract plain note text. It intentionally ignores Apple Notes formatting attribute runs and embedded objects for now, reporting warnings instead of attempting partial rich rendering. Use the default `apple-cloud-notes-parser` mode for full MVP exports.

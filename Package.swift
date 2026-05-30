@@ -18,6 +18,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("WebKit"),
                 .linkedLibrary("sqlite3"),
+                .linkedLibrary("z"),
             ]
         ),
         .executableTarget(

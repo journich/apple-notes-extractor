@@ -158,6 +158,19 @@ public struct SQLiteRow: Equatable, Sendable {
             return nil
         }
     }
+
+    public func blob(_ name: String) -> Data? {
+        guard let value = values[name] else {
+            return nil
+        }
+
+        switch value {
+        case .blob(let data):
+            return data
+        case .null, .integer, .real, .text:
+            return nil
+        }
+    }
 }
 
 public enum SQLiteValue: Equatable, Sendable {

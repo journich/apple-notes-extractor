@@ -261,7 +261,7 @@ public struct AppleCloudNotesParserFormatter {
         let documentLine = documents.isEmpty ? "" : "\nNote documents: \(documents.count)"
         let debugLine = debugHTMLURLs.isEmpty ? "" : "\nDebug HTML files: \(debugHTMLURLs.count)"
         return """
-        Apple Cloud Notes Parser result:
+        Parser result:
         Output directory: \(result.outputDirectory.path)
         JSON: \(result.jsonPath.path)
         Parsed notes: \(result.notes.count)

@@ -110,16 +110,19 @@ public struct AppRunner {
                 workDirectory: work
             )
             output(SnapshotFormatter().format(snapshot))
-        case .parse(let noteUUID, let notesContainerPath, let parserScriptPath, let rubyPath, let outputDirectoryPath, let debugHTMLDirectoryPath):
+        case .parse(let noteUUID, let databasePath, let notesContainerPath, let parserMode, let parserScriptPath, let rubyPath, let outputDirectoryPath, let debugHTMLDirectoryPath):
             let paths = AppPaths(fileManager: fileManager, environment: environment)
             let source = notesContainerPath.map { paths.expandPath($0).standardizedFileURL }
                 ?? AppleNotesPaths(paths: paths).groupContainerURL
             let outputDirectory = paths.expandPath(outputDirectoryPath ?? "~/Library/Application Support/Notes2MyICOR/acnp-output").standardizedFileURL
-            let parser = AppleCloudNotesParser(config: AppleCloudNotesParserConfig(
-                rubyExecutablePath: rubyPath ?? "/opt/homebrew/opt/ruby/bin/ruby",
-                parserScriptPath: parserScriptPath ?? "../apple_cloud_notes_parser/notes_cloud_ripper.rb",
-                outputDirectory: outputDirectory
-            ))
+            let parser = noteParser(
+                parserMode: parserMode,
+                databasePath: databasePath,
+                notesContainerPath: source.path,
+                parserScriptPath: parserScriptPath,
+                rubyPath: rubyPath,
+                parserOutputDirectory: outputDirectory
+            )
             let result = try parser.parse(notesContainer: source, noteUUIDs: noteUUID.map { [$0] } ?? [])
             let documents = result.notes.map { NoteDocumentBuilder().document(parsedNote: $0) }
             let debugHTMLURLs: [URL]
@@ -178,7 +181,7 @@ public struct AppRunner {
                 )
             )
             output(NoteExportFormatter().format(result))
-        case .syncOnce(let dryRun, let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let stateDatabasePath):
+        case .syncOnce(let dryRun, let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let parserMode, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let stateDatabasePath):
             let summary = try runSyncOnce(
                 dryRun: dryRun,
                 accountName: accountName,
@@ -186,6 +189,7 @@ public struct AppRunner {
                 recursive: recursive,
                 databasePath: databasePath,
                 notesContainerPath: notesContainerPath,
+                parserMode: parserMode,
                 parserScriptPath: parserScriptPath,
                 rubyPath: rubyPath,
                 parserOutputDirectoryPath: parserOutputDirectoryPath,
@@ -193,7 +197,7 @@ public struct AppRunner {
                 stateDatabasePath: stateDatabasePath
             )
             output(SyncSummaryFormatter().format(summary))
-        case .syncWatch(let dryRun, let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let stateDatabasePath, let intervalSeconds, let maxRuns):
+        case .syncWatch(let dryRun, let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let parserMode, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let stateDatabasePath, let intervalSeconds, let maxRuns):
             var completedRuns = 0
             while maxRuns == nil || completedRuns < (maxRuns ?? 0) {
                 let summary = try runSyncOnce(
@@ -203,6 +207,7 @@ public struct AppRunner {
                     recursive: recursive,
                     databasePath: databasePath,
                     notesContainerPath: notesContainerPath,
+                    parserMode: parserMode,
                     parserScriptPath: parserScriptPath,
                     rubyPath: rubyPath,
                     parserOutputDirectoryPath: parserOutputDirectoryPath,
@@ -218,7 +223,7 @@ public struct AppRunner {
             if maxRuns != nil {
                 output("Watch completed: runs=\(completedRuns)")
             }
-        case .installLaunchAgent(let label, let binaryPath, let launchAgentsDirectoryPath, let logDirectoryPath, let intervalSeconds, let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let stateDatabasePath):
+        case .installLaunchAgent(let label, let binaryPath, let launchAgentsDirectoryPath, let logDirectoryPath, let intervalSeconds, let accountName, let folderPath, let recursive, let databasePath, let notesContainerPath, let parserMode, let parserScriptPath, let rubyPath, let parserOutputDirectoryPath, let outputDirectoryPath, let stateDatabasePath):
             let paths = AppPaths(fileManager: fileManager, environment: environment)
             let config = LaunchAgentConfig(
                 label: label,
@@ -229,6 +234,7 @@ public struct AppRunner {
                     recursive: recursive,
                     databasePath: databasePath,
                     notesContainerPath: notesContainerPath,
+                    parserMode: parserMode,
                     parserScriptPath: parserScriptPath,
                     rubyPath: rubyPath,
                     parserOutputDirectoryPath: parserOutputDirectoryPath,
@@ -272,6 +278,7 @@ public struct AppRunner {
         recursive: Bool?,
         databasePath: String?,
         notesContainerPath: String?,
+        parserMode: String?,
         parserScriptPath: String?,
         rubyPath: String?,
         parserOutputDirectoryPath: String?,
@@ -285,11 +292,14 @@ public struct AppRunner {
         let outputDirectory = paths.expandPath(outputDirectoryPath ?? AppConfig.defaultConfig.paths.outputDirectory).standardizedFileURL
         let stateURL = paths.expandPath(stateDatabasePath ?? AppConfig.defaultConfig.paths.stateDatabase).standardizedFileURL
         let stateDatabase = try StateDatabase.open(at: stateURL)
-        let parser = AppleCloudNotesParser(config: AppleCloudNotesParserConfig(
-            rubyExecutablePath: rubyPath ?? "/opt/homebrew/opt/ruby/bin/ruby",
-            parserScriptPath: parserScriptPath ?? "../apple_cloud_notes_parser/notes_cloud_ripper.rb",
-            outputDirectory: parserOutputDirectory
-        ))
+        let parser = noteParser(
+            parserMode: parserMode,
+            databasePath: databasePath,
+            notesContainerPath: notesContainer.path,
+            parserScriptPath: parserScriptPath,
+            rubyPath: rubyPath,
+            parserOutputDirectory: parserOutputDirectory
+        )
         let engine = SyncEngine(
             stateDatabase: stateDatabase,
             parser: parser,
@@ -315,12 +325,36 @@ public struct AppRunner {
         ))
     }
 
+    private func noteParser(
+        parserMode: String?,
+        databasePath: String?,
+        notesContainerPath: String?,
+        parserScriptPath: String?,
+        rubyPath: String?,
+        parserOutputDirectory: URL
+    ) -> any NoteParsing {
+        switch parserMode ?? AppConfig.defaultConfig.parser.mode {
+        case "native-swift":
+            return NativeAppleNotesParser(config: NativeAppleNotesParserConfig(
+                databaseURL: appleNotesDatabaseURL(databasePath: databasePath, notesContainerPath: notesContainerPath),
+                outputDirectory: parserOutputDirectory
+            ))
+        default:
+            return AppleCloudNotesParser(config: AppleCloudNotesParserConfig(
+                rubyExecutablePath: rubyPath ?? "/opt/homebrew/opt/ruby/bin/ruby",
+                parserScriptPath: parserScriptPath ?? "../apple_cloud_notes_parser/notes_cloud_ripper.rb",
+                outputDirectory: parserOutputDirectory
+            ))
+        }
+    }
+
     private func launchAgentSyncArguments(
         accountName: String?,
         folderPath: String?,
         recursive: Bool?,
         databasePath: String?,
         notesContainerPath: String?,
+        parserMode: String?,
         parserScriptPath: String?,
         rubyPath: String?,
         parserOutputDirectoryPath: String?,
@@ -335,6 +369,7 @@ public struct AppRunner {
         }
         appendOption("--database", databasePath, to: &arguments)
         appendOption("--notes-container", notesContainerPath, to: &arguments)
+        appendOption("--parser-mode", parserMode, to: &arguments)
         appendOption("--parser-script", parserScriptPath, to: &arguments)
         appendOption("--ruby", rubyPath, to: &arguments)
         appendOption("--parser-output-dir", parserOutputDirectoryPath, to: &arguments)
@@ -416,7 +451,7 @@ public extension AppRunner {
       notes2myicor reset-state --note-uuid <uuid> [--state-db <path>]
       notes2myicor scan --account <name> --folder <path> [--recursive] [--database <path>] [--notes-container <path>] [--state-db <path>]
       notes2myicor snapshot [--notes-container <path>] [--work-dir <path>]
-      notes2myicor parse [--note-uuid <uuid>] [--notes-container <path>] [--parser-script <path>] [--ruby <path>] [--output-dir <path>] [--debug-html-dir <path>]
+      notes2myicor parse [--note-uuid <uuid>] [--parser-mode <mode>] [--database <path>] [--notes-container <path>] [--parser-script <path>] [--ruby <path>] [--output-dir <path>] [--debug-html-dir <path>]
       notes2myicor export --note-uuid <uuid> [--html <path>] [--title <title>] [--output-dir <path>] [--debug-html]
       notes2myicor sync --once [--dry-run] [--account <name>] [--folder <path>] [--recursive]
       notes2myicor sync --watch [--interval-seconds <seconds>] [--account <name>] [--folder <path>] [--recursive]
@@ -462,6 +497,7 @@ public extension AppRunner {
       --notes-container   Apple Notes group container path. Defaults to ~/Library/Group Containers/group.com.apple.notes.
       --note-uuid         Apple Notes note UUID.
       --output-dir        Parser output directory.
+      --parser-mode       Parser mode: apple-cloud-notes-parser or native-swift.
       --parser-output-dir Parser work output directory when export invokes the parser.
       --parser-script     Apple Cloud Notes Parser notes_cloud_ripper.rb path.
       --recursive         Include subfolders when used with notes and --folder.
@@ -489,11 +525,11 @@ public enum CLICommand: Equatable, Sendable {
     case resetState(noteUUID: String, stateDatabasePath: String?)
     case scan(accountName: String, folderPath: String, recursive: Bool, databasePath: String?, notesContainerPath: String?, stateDatabasePath: String?)
     case snapshot(notesContainerPath: String?, workDirectoryPath: String?)
-    case parse(noteUUID: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, outputDirectoryPath: String?, debugHTMLDirectoryPath: String?)
+    case parse(noteUUID: String?, databasePath: String?, notesContainerPath: String?, parserMode: String?, parserScriptPath: String?, rubyPath: String?, outputDirectoryPath: String?, debugHTMLDirectoryPath: String?)
     case export(noteUUID: String, title: String?, htmlPath: String?, accountName: String?, folderPath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, writeDebugHTML: Bool)
-    case syncOnce(dryRun: Bool, accountName: String?, folderPath: String?, recursive: Bool?, databasePath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, stateDatabasePath: String?)
-    case syncWatch(dryRun: Bool, accountName: String?, folderPath: String?, recursive: Bool?, databasePath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, stateDatabasePath: String?, intervalSeconds: Int, maxRuns: Int?)
-    case installLaunchAgent(label: String, binaryPath: String?, launchAgentsDirectoryPath: String?, logDirectoryPath: String?, intervalSeconds: Int, accountName: String?, folderPath: String?, recursive: Bool?, databasePath: String?, notesContainerPath: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, stateDatabasePath: String?)
+    case syncOnce(dryRun: Bool, accountName: String?, folderPath: String?, recursive: Bool?, databasePath: String?, notesContainerPath: String?, parserMode: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, stateDatabasePath: String?)
+    case syncWatch(dryRun: Bool, accountName: String?, folderPath: String?, recursive: Bool?, databasePath: String?, notesContainerPath: String?, parserMode: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, stateDatabasePath: String?, intervalSeconds: Int, maxRuns: Int?)
+    case installLaunchAgent(label: String, binaryPath: String?, launchAgentsDirectoryPath: String?, logDirectoryPath: String?, intervalSeconds: Int, accountName: String?, folderPath: String?, recursive: Bool?, databasePath: String?, notesContainerPath: String?, parserMode: String?, parserScriptPath: String?, rubyPath: String?, parserOutputDirectoryPath: String?, outputDirectoryPath: String?, stateDatabasePath: String?)
     case uninstallLaunchAgent(label: String, launchAgentsDirectoryPath: String?)
     case launchAgentStatus(label: String, launchAgentsDirectoryPath: String?)
 
@@ -573,7 +609,9 @@ public enum CLICommand: Equatable, Sendable {
             let options = try parseParserOptions(Array(arguments.dropFirst()))
             return .parse(
                 noteUUID: options.noteUUID,
+                databasePath: options.databasePath,
                 notesContainerPath: options.notesContainerPath,
+                parserMode: options.parserMode,
                 parserScriptPath: options.parserScriptPath,
                 rubyPath: options.rubyPath,
                 outputDirectoryPath: options.outputDirectoryPath,
@@ -610,6 +648,7 @@ public enum CLICommand: Equatable, Sendable {
                     recursive: options.recursive,
                     databasePath: options.databasePath,
                     notesContainerPath: options.notesContainerPath,
+                    parserMode: options.parserMode,
                     parserScriptPath: options.parserScriptPath,
                     rubyPath: options.rubyPath,
                     parserOutputDirectoryPath: options.parserOutputDirectoryPath,
@@ -626,6 +665,7 @@ public enum CLICommand: Equatable, Sendable {
                     recursive: options.recursive,
                     databasePath: options.databasePath,
                     notesContainerPath: options.notesContainerPath,
+                    parserMode: options.parserMode,
                     parserScriptPath: options.parserScriptPath,
                     rubyPath: options.rubyPath,
                     parserOutputDirectoryPath: options.parserOutputDirectoryPath,
@@ -647,6 +687,7 @@ public enum CLICommand: Equatable, Sendable {
                 recursive: options.recursive,
                 databasePath: options.databasePath,
                 notesContainerPath: options.notesContainerPath,
+                parserMode: options.parserMode,
                 parserScriptPath: options.parserScriptPath,
                 rubyPath: options.rubyPath,
                 parserOutputDirectoryPath: options.parserOutputDirectoryPath,
@@ -807,8 +848,12 @@ public enum CLICommand: Equatable, Sendable {
             switch argument {
             case "--note-uuid":
                 options.noteUUID = try requireValue(iterator.next(), for: argument)
+            case "--database":
+                options.databasePath = try requireValue(iterator.next(), for: argument)
             case "--notes-container":
                 options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-mode":
+                options.parserMode = try requireParserMode(iterator.next(), for: argument)
             case "--parser-script":
                 options.parserScriptPath = try requireValue(iterator.next(), for: argument)
             case "--ruby":
@@ -845,6 +890,8 @@ public enum CLICommand: Equatable, Sendable {
                 options.folderPath = try requireValue(iterator.next(), for: argument)
             case "--notes-container":
                 options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-mode":
+                options.parserMode = try requireParserMode(iterator.next(), for: argument)
             case "--parser-script":
                 options.parserScriptPath = try requireValue(iterator.next(), for: argument)
             case "--ruby":
@@ -887,6 +934,8 @@ public enum CLICommand: Equatable, Sendable {
                 options.databasePath = try requireValue(iterator.next(), for: argument)
             case "--notes-container":
                 options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-mode":
+                options.parserMode = try requireParserMode(iterator.next(), for: argument)
             case "--parser-script":
                 options.parserScriptPath = try requireValue(iterator.next(), for: argument)
             case "--ruby":
@@ -937,6 +986,8 @@ public enum CLICommand: Equatable, Sendable {
                 options.databasePath = try requireValue(iterator.next(), for: argument)
             case "--notes-container":
                 options.notesContainerPath = try requireValue(iterator.next(), for: argument)
+            case "--parser-mode":
+                options.parserMode = try requireParserMode(iterator.next(), for: argument)
             case "--parser-script":
                 options.parserScriptPath = try requireValue(iterator.next(), for: argument)
             case "--ruby":
@@ -990,6 +1041,14 @@ public enum CLICommand: Equatable, Sendable {
         return value
     }
 
+    private static func requireParserMode(_ value: String?, for argument: String) throws -> String {
+        let value = try requireValue(value, for: argument)
+        guard ["apple-cloud-notes-parser", "native-swift"].contains(value) else {
+            throw CLIError.usage("Value for \(argument) must be apple-cloud-notes-parser or native-swift")
+        }
+        return value
+    }
+
     private static func requirePositiveInt(_ value: String?, for argument: String) throws -> Int {
         let parsed = try requireNonNegativeInt(value, for: argument)
         guard parsed > 0 else {
@@ -1028,7 +1087,9 @@ private struct SnapshotOptions {
 
 private struct ParserOptions {
     var noteUUID: String?
+    var databasePath: String?
     var notesContainerPath: String?
+    var parserMode: String?
     var parserScriptPath: String?
     var rubyPath: String?
     var outputDirectoryPath: String?
@@ -1042,6 +1103,7 @@ private struct ExportOptions {
     var accountName: String?
     var folderPath: String?
     var notesContainerPath: String?
+    var parserMode: String?
     var parserScriptPath: String?
     var rubyPath: String?
     var parserOutputDirectoryPath: String?
@@ -1058,6 +1120,7 @@ private struct SyncOptions {
     var recursive: Bool?
     var databasePath: String?
     var notesContainerPath: String?
+    var parserMode: String?
     var parserScriptPath: String?
     var rubyPath: String?
     var parserOutputDirectoryPath: String?
@@ -1078,6 +1141,7 @@ private struct LaunchAgentInstallOptions {
     var recursive: Bool?
     var databasePath: String?
     var notesContainerPath: String?
+    var parserMode: String?
     var parserScriptPath: String?
     var rubyPath: String?
     var parserOutputDirectoryPath: String?
